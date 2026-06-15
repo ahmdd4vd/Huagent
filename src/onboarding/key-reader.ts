@@ -29,7 +29,7 @@ export interface KeyReaderOptions {
  * Used in production; tests inject their own.
  */
 async function readCharTTY(): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise<string>((resolve) => {
     const stdin = process.stdin;
     if (!stdin.isTTY) {
       // Non-TTY (piped): read a line

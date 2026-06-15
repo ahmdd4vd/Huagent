@@ -1,15 +1,15 @@
 /**
- * steps/provider-pick.ts — Interactive provider picker (raw mode).
+ * steps/provider-pick.ts — Interactive provider picker (keypress-driven).
  *
  * Shows a scrollable list of providers grouped by API format.
- * ↑/↓ to navigate, Enter to select, Esc to cancel.
+ * ↑/↓ (or k/j) to navigate, Enter to select, Esc/Ctrl+C to cancel.
  */
 import { listProviders, PROVIDERS, type ProviderId } from '../../providers/registry.js';
 import { fg, gradient, glyph } from '../../tui/theme.js';
+import { listenForKeys, isUp, isDown, isEnter, isEscape, isCtrlC, type KeyEvent } from '../keypress.js';
 
 export async function pickProvider(): Promise<ProviderId> {
   const providers = listProviders();
-  const current = providers[0]?.id || 'anthropic';
 
   // Group by apiFormat
   const groups: Record<string, typeof providers> = {};
@@ -32,110 +32,100 @@ export async function pickProvider(): Promise<ProviderId> {
     }
   }
 
-  return new Promise<ProviderId>((resolve, reject) => {
-    const stdin = process.stdin;
-    if (!stdin.isTTY) {
-      // Non-interactive: use default
-      resolve(current);
-      return;
-    }
-    stdin.setRawMode(true);
-    stdin.resume();
+  // Non-TTY: use default
+  if (!process.stdin.isTTY) {
+    return providers[0]?.id || 'anthropic';
+  }
 
-    // Find first selectable row
-    let cursor = rows.findIndex((r) => r.kind === 'item');
-    let offset = 0;
-    const maxVisible = 12;
-    const totalWidth = Math.max(60, (process.stdout.columns || 100) - 4);
+  let cursor = rows.findIndex((r) => r.kind === 'item');
+  if (cursor < 0) cursor = 0;
+  let offset = 0;
+  const maxVisible = 12;
+  const totalWidth = Math.max(60, (process.stdout.columns || 100) - 4);
 
-    const render = () => {
-      // Clear screen
-      process.stdout.write('\x1b[2J\x1b[H');
-      process.stdout.write('\n');
-      process.stdout.write(
-        '  ' +
-          gradient('Choose Your LLM Provider', '#FF6B9D', '#C589E8') +
-          '\n',
-      );
-      process.stdout.write('  ' + fg('#565F89', '─'.repeat(totalWidth - 4)) + '\n');
-      process.stdout.write('  ' + fg('#9AA5CE', `${providers.length} providers · ↑/↓ to navigate · Enter to select · Esc to cancel`) + '\n\n');
+  const render = () => {
+    process.stdout.write('\x1b[2J\x1b[H');
+    process.stdout.write('\n');
+    process.stdout.write(
+      '  ' +
+        gradient('Choose Your LLM Provider', '#FF6B9D', '#C589E8') +
+        '\n',
+    );
+    process.stdout.write('  ' + fg('#565F89', '─'.repeat(totalWidth - 4)) + '\n');
+    process.stdout.write(
+      '  ' +
+        fg('#9AA5CE', `${providers.length} providers · ↑/↓ navigate · Enter select · Esc cancel`) +
+        '\n\n',
+    );
 
-      const visible = rows.slice(offset, offset + maxVisible);
-      for (let i = 0; i < visible.length; i++) {
-        const r = visible[i];
-        const absIdx = i + offset;
-        const isCursor = absIdx === cursor;
-        if (r.kind === 'header') {
-          process.stdout.write(
-            '  ' +
-              (isCursor ? fg('#FFD700', glyph.arrow + ' ') : '  ') +
-              fg('#FFC75F', r.text) +
-              '\n',
-          );
-        } else {
-          const prefix = isCursor ? fg('#FF6B9D', glyph.arrow + ' ') : '   ';
-          const text = isCursor ? fg('#C0CAF5', r.text) : r.text;
-          process.stdout.write('  ' + prefix + text + '\n');
-        }
+    const visible = rows.slice(offset, offset + maxVisible);
+    for (let i = 0; i < visible.length; i++) {
+      const r = visible[i];
+      const absIdx = i + offset;
+      const isCursor = absIdx === cursor;
+      if (r.kind === 'header') {
+        process.stdout.write(
+          '  ' + (isCursor ? fg('#FFD700', glyph.arrow + ' ') : '  ') + fg('#FFC75F', r.text) + '\n',
+        );
+      } else {
+        const prefix = isCursor ? fg('#FF6B9D', glyph.arrow + ' ') : '   ';
+        const text = isCursor ? fg('#C0CAF5', r.text) : r.text;
+        process.stdout.write('  ' + prefix + text + '\n');
       }
-    };
+    }
+  };
 
+  return new Promise<ProviderId>((resolve, reject) => {
     render();
 
-    const cleanup = () => {
-      stdin.removeListener('data', onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-    };
-
-    const onData = (chunk: Buffer) => {
-      const s = chunk.toString('utf8');
-      if (s === '\x03') {
-        cleanup();
-        reject(new Error('cancelled'));
-        return;
-      }
-      if (s === '\x1b') {
-        cleanup();
-        reject(new Error('cancelled'));
-        return;
-      }
-      // Arrow keys: \x1b[A (up), \x1b[B (down)
-      if (s === '\x1b[A' || s === 'k') {
-        // Find previous item
-        let next = cursor - 1;
-        while (next >= 0 && rows[next].kind !== 'item') next--;
-        if (next < 0) next = rows.length - 1;
-        while (rows[next].kind !== 'item') next--;
-        cursor = next;
-        if (cursor < offset) offset = cursor;
-        if (cursor >= offset + maxVisible) offset = cursor - maxVisible + 1;
-        render();
-        return;
-      }
-      if (s === '\x1b[B' || s === 'j') {
-        let next = cursor + 1;
-        while (next < rows.length && rows[next].kind !== 'item') next++;
-        if (next >= rows.length) next = rows.findIndex((r) => r.kind === 'item');
-        cursor = next;
-        if (cursor >= offset + maxVisible) offset = cursor - maxVisible + 1;
-        render();
-        return;
-      }
-      if (s === '\r' || s === '\n') {
-        const r = rows[cursor];
-        if (r.kind === 'item' && r.id) {
-          cleanup();
-          process.stdout.write('\n');
-          process.stdout.write(
-            '  ' + fg('#7BC74D', '✓') + ' ' + fg('#C0CAF5', `Provider: `) + fg('#FF6B9D', PROVIDERS[r.id].displayName) + '\n\n',
-          );
-          resolve(r.id);
+    listenForKeys({
+      onKey: (k: KeyEvent) => {
+        if (isCtrlC(k) || isEscape(k)) {
+          reject(new Error('cancelled'));
+          return true;
         }
-        return;
-      }
-    };
-
-    stdin.on('data', onData);
+        if (isUp(k)) {
+          // Find previous item
+          let next = cursor - 1;
+          while (next >= 0 && rows[next].kind !== 'item') next--;
+          if (next < 0) {
+            // Wrap to last
+            next = rows.length - 1;
+            while (next > 0 && rows[next].kind !== 'item') next--;
+          }
+          cursor = next;
+          if (cursor < offset) offset = cursor;
+          if (cursor >= offset + maxVisible) offset = cursor - maxVisible + 1;
+          render();
+          return false;
+        }
+        if (isDown(k)) {
+          // Find next item
+          let next = cursor + 1;
+          while (next < rows.length && rows[next].kind !== 'item') next++;
+          if (next >= rows.length) {
+            // Wrap to first
+            next = rows.findIndex((r) => r.kind === 'item');
+          }
+          cursor = next;
+          if (cursor >= offset + maxVisible) offset = cursor - maxVisible + 1;
+          render();
+          return false;
+        }
+        if (isEnter(k)) {
+          const r = rows[cursor];
+          if (r.kind === 'item' && r.id) {
+            process.stdout.write('\n');
+            process.stdout.write(
+              '  ' + fg('#7BC74D', '✓') + ' ' + fg('#C0CAF5', `Provider: `) + fg('#FF6B9D', PROVIDERS[r.id].displayName) + '\n\n',
+            );
+            resolve(r.id);
+            return true;
+          }
+          return false;
+        }
+        return false;
+      },
+    }).catch(reject);
   });
 }

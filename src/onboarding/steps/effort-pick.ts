@@ -1,8 +1,5 @@
 /**
- * steps/effort-pick.ts — Final step: confirm effort tier (raw mode).
- *
- * Auto-detects from a sample task description, but user can override.
- * Shows 6 tiers: low / medium / high / xhigh / max / ultramax
+ * steps/effort-pick.ts — Final step: confirm effort tier (keypress-driven).
  */
 import {
   detectEffort,
@@ -11,9 +8,9 @@ import {
   type EffortTier,
 } from '../effort-detector.js';
 import { fg, gradient, glyph } from '../../tui/theme.js';
+import { listenForKeys, isUp, isDown, isEnter, isEscape, isCtrlC, type KeyEvent } from '../keypress.js';
 
 export async function pickEffort(sampleTask?: string): Promise<EffortTier> {
-  // Auto-detect from sample (if provided)
   const detected = sampleTask ? detectEffort(sampleTask) : 'medium';
 
   const rows: Array<{ kind: 'header' | 'item'; text: string; tier?: EffortTier }> = [
@@ -29,91 +26,72 @@ export async function pickEffort(sampleTask?: string): Promise<EffortTier> {
     });
   }
 
+  if (!process.stdin.isTTY) return detected;
+
   let cursor = EFFORT_TIERS.indexOf(detected);
   if (cursor < 0) cursor = 1; // medium
+  // +1 because of the header at rows[0]
+  let rowCursor = cursor + 1;
+
+  const render = () => {
+    process.stdout.write('\x1b[2J\x1b[H');
+    process.stdout.write('\n');
+    process.stdout.write('  ' + gradient('Step 4: Confirm Effort Level', '#FF6B9D', '#C589E8') + '\n');
+    process.stdout.write('  ' + fg('#565F89', '─'.repeat(78)) + '\n');
+    if (sampleTask) {
+      process.stdout.write('  ' + fg('#9AA5CE', 'Detected from your task: ') + fg('#FFD700', detected) + '\n');
+    } else {
+      process.stdout.write('  ' + fg('#9AA5CE', 'Default: ') + fg('#FFD700', 'medium') + '\n');
+    }
+    process.stdout.write('\n');
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.kind === 'header') {
+        process.stdout.write('  ' + fg('#FFC75F', r.text) + '\n');
+      } else {
+        const isCursor = i === rowCursor;
+        const prefix = isCursor ? fg('#FF6B9D', glyph.arrow + ' ') : '   ';
+        process.stdout.write('  ' + prefix + r.text + '\n');
+      }
+    }
+    process.stdout.write('\n');
+    process.stdout.write('  ' + fg('#565F89', '★ = auto-detected  ·  ↑/↓ change  ·  Enter confirm') + '\n');
+  };
 
   return new Promise<EffortTier>((resolve, reject) => {
-    const stdin = process.stdin;
-    if (!stdin.isTTY) {
-      resolve(detected);
-      return;
-    }
-    stdin.setRawMode(true);
-    stdin.resume();
-
-    const render = () => {
-      process.stdout.write('\x1b[2J\x1b[H');
-      process.stdout.write('\n');
-      process.stdout.write(
-        '  ' + gradient('Step 4: Confirm Effort Level', '#FF6B9D', '#C589E8') + '\n',
-      );
-      process.stdout.write('  ' + fg('#565F89', '─'.repeat(78)) + '\n');
-      if (sampleTask) {
-        process.stdout.write(
-          '  ' + fg('#9AA5CE', 'Detected from your task: ') + fg('#FFD700', detected) + '\n',
-        );
-      } else {
-        process.stdout.write(
-          '  ' + fg('#9AA5CE', 'Default: ') + fg('#FFD700', 'medium') + '\n',
-        );
-      }
-      process.stdout.write('\n');
-
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        if (r.kind === 'header') {
-          process.stdout.write('  ' + fg('#FFC75F', r.text) + '\n');
-        } else {
-          const isCursor = i === cursor;
-          const prefix = isCursor ? fg('#FF6B9D', glyph.arrow + ' ') : '   ';
-          process.stdout.write('  ' + prefix + r.text + '\n');
-        }
-      }
-      process.stdout.write('\n');
-      process.stdout.write(
-        '  ' + fg('#565F89', '★ = auto-detected  ·  ↑/↓ to change  ·  Enter to confirm') + '\n',
-      );
-    };
-
     render();
 
-    const cleanup = () => {
-      stdin.removeListener('data', onData);
-      stdin.setRawMode(false);
-      stdin.pause();
-    };
-
-    const onData = (chunk: Buffer) => {
-      const s = chunk.toString('utf8');
-      if (s === '\x03' || s === '\x1b') {
-        cleanup();
-        reject(new Error('cancelled'));
-        return;
-      }
-      if (s === '\x1b[A' || s === 'k') {
-        cursor = Math.max(1, cursor - 1); // skip header
-        render();
-        return;
-      }
-      if (s === '\x1b[B' || s === 'j') {
-        cursor = Math.min(rows.length - 1, cursor + 1);
-        render();
-        return;
-      }
-      if (s === '\r' || s === '\n') {
-        const r = rows[cursor];
-        if (r.kind === 'item' && r.tier) {
-          cleanup();
-          process.stdout.write('\n');
-          process.stdout.write(
-            '  ' + fg('#7BC74D', '✓') + ' ' + fg('#C0CAF5', 'Effort: ') + fg('#FF6B9D', r.tier) + '\n\n',
-          );
-          resolve(r.tier);
+    listenForKeys({
+      onKey: (k: KeyEvent) => {
+        if (isCtrlC(k) || isEscape(k)) {
+          reject(new Error('cancelled'));
+          return true;
         }
-        return;
-      }
-    };
-
-    stdin.on('data', onData);
+        if (isUp(k)) {
+          rowCursor = Math.max(1, rowCursor - 1); // skip header at rows[0]
+          render();
+          return false;
+        }
+        if (isDown(k)) {
+          rowCursor = Math.min(rows.length - 1, rowCursor + 1);
+          render();
+          return false;
+        }
+        if (isEnter(k)) {
+          const r = rows[rowCursor];
+          if (r.kind === 'item' && r.tier) {
+            process.stdout.write('\n');
+            process.stdout.write(
+              '  ' + fg('#7BC74D', '✓') + ' ' + fg('#C0CAF5', 'Effort: ') + fg('#FF6B9D', r.tier) + '\n\n',
+            );
+            resolve(r.tier);
+            return true;
+          }
+          return false;
+        }
+        return false;
+      },
+    }).catch(reject);
   });
 }
