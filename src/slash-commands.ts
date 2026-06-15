@@ -54,6 +54,10 @@ export interface SlashCommandContext {
   onOpenPermissionPicker?: () => void;
   /** Persist config to disk. */
   onPersistConfig?: () => void;
+  /** Get current effort tier. */
+  onGetEffort?: () => string | null;
+  /** Set effort tier. */
+  onSetEffort?: (effort: string) => void;
 }
 
 export interface SlashCommandResult {
@@ -80,6 +84,7 @@ export const SLASH_COMMANDS = [
   { name: 'skills', aliases: ['skill'], summary: 'List, install, or invoke available skills' },
   { name: 'init', aliases: [], summary: 'Create a starter HUAAGENT.md for this project' },
   { name: 'diff', aliases: [], summary: 'Show git diff for current workspace changes' },
+  { name: 'effort', aliases: ['e'], summary: 'Show or set the effort tier (low/medium/high/xhigh/max/ultramax)' },
   { name: 'version', aliases: ['v'], summary: 'Show CLI version' },
   { name: 'marketplace', aliases: ['shop', 'store'], summary: 'Browse, search, and install wiki bundles' },
   { name: 'agents', aliases: ['subs'], summary: 'List and manage subagents' },
@@ -156,6 +161,9 @@ export async function executeSlashCommand(
       return cmdActivity(ctx);
     case 'diff':
       return await cmdDiff(ctx);
+    case 'effort':
+    case 'e':
+      return cmdEffort(args, ctx);
     case 'version':
     case 'v':
       return cmdVersion([], ctx);
@@ -799,6 +807,57 @@ async function cmdDiff(ctx: SlashCommandContext): Promise<SlashCommandResult> {
 function cmdVersion(_args: string[], ctx: SlashCommandContext): SlashCommandResult {
   const v = (ctx.config && ctx.config.version) || '4.0.0';
   return { handled: true, message: `${mascots.smallHua} ${fg(theme.primary, 'huagent v' + v)}` };
+}
+
+/**
+ * /effort — show or change the effort tier.
+ * Usage: /effort           show current tier
+ *        /effort <tier>    set tier (low/medium/high/xhigh/max/ultramax)
+ *        /effort auto      auto-detect from last user message
+ */
+function cmdEffort(args: string[], ctx: SlashCommandContext): SlashCommandResult {
+  const current = ctx.onGetEffort ? ctx.onGetEffort() : (ctx.config.effort as string | undefined) || 'medium';
+  const VALID = ['low', 'medium', 'high', 'xhigh', 'max', 'ultramax'];
+
+  if (args.length === 0) {
+    let msg = `\n${gradient('Effort Tier', theme.primary, theme.secondary)}\n`;
+    msg += `${fg(theme.fgDim, '─'.repeat(60))}\n`;
+    msg += `  ${fg(theme.accent, 'Current:  ')} ${fg(theme.primary, current)}\n\n`;
+    msg += `  ${fg(theme.fgDim, 'Tiers:')}\n`;
+    for (const t of VALID) {
+      const marker = t === current ? '●' : '○';
+      const color = t === current ? theme.success : theme.fg;
+      const desc = {
+        low: 'Quick answer, minimal reasoning',
+        medium: 'Short task, focused work',
+        high: 'Multi-step implementation, full attention',
+        xhigh: 'Complex system, deep reasoning',
+        max: 'Large migration, extended session',
+        ultramax: 'Enterprise scale, marathon mode',
+      }[t];
+      msg += `    ${fg(color, marker + ' ' + t.padEnd(10))} ${fg(theme.fgSubtle, desc)}\n`;
+    }
+    msg += `\n${fg(theme.fgDim, 'Usage: /effort <tier>  |  /effort auto')}\n`;
+    return { handled: true, message: msg };
+  }
+
+  const arg = args[0].toLowerCase();
+  if (arg === 'auto') {
+    // Auto-detect from last user message
+    const lastUser = [...ctx.messages].reverse().find((m) => m.role === 'user');
+    const text = (lastUser?.content as string) || '';
+    const { detectEffort } = require('../onboarding/effort-detector.js');
+    const detected = detectEffort(text);
+    if (ctx.onSetEffort) ctx.onSetEffort(detected);
+    return { handled: true, message: `${mascots.smallHua} ${fg(theme.success, '✓ Effort auto-detected: ' + detected)}` };
+  }
+
+  if (!VALID.includes(arg)) {
+    return { handled: true, message: `${fg(theme.danger, '✗ Invalid tier: ' + arg)}\n${fg(theme.fgDim, 'Valid: ' + VALID.join(', '))}` };
+  }
+
+  if (ctx.onSetEffort) ctx.onSetEffort(arg);
+  return { handled: true, message: `${mascots.smallHua} ${fg(theme.success, '✓ Effort set to: ' + arg)}` };
 }
 
 function cmdSessions(args: string[], ctx: SlashCommandContext): SlashCommandResult {

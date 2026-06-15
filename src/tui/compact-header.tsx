@@ -22,6 +22,7 @@ export interface CompactHeaderProps {
   autonomous: boolean;
   scope: string | null;
   engine: string;
+  effort?: string;
   projectName?: string;
   width?: number;
 }
@@ -32,6 +33,7 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
   autonomous,
   scope,
   engine,
+  effort,
   projectName,
   width = 100,
 }) => {
@@ -58,6 +60,7 @@ export const CompactHeader: React.FC<CompactHeaderProps> = ({
           scope={scope}
           permissionMode={permissionMode}
           model={model}
+          effort={effort}
           width={width - 2}
         />
       </Box>

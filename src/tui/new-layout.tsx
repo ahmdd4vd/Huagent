@@ -46,6 +46,7 @@ export interface SessionConfig {
   workdir?: string;
   model?: string;
   provider?: string;
+  effort?: string;
 }
 
 export interface ChatMessage {
@@ -318,6 +319,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
         autonomous={autonomous}
         scope={scope}
         engine={engine}
+        effort={config?.effort}
         projectName={projectName}
         width={contentWidth}
       />

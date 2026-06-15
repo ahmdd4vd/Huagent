@@ -17,6 +17,7 @@ export interface ModeChipsProps {
   scope: string | null;
   permissionMode: string;
   model: string;
+  effort?: string;
   width?: number;
 }
 
@@ -25,10 +26,12 @@ export const ModeChips: React.FC<ModeChipsProps> = ({
   scope,
   permissionMode,
   model,
+  effort,
   width = 100,
 }) => {
   // Adaptive: drop the model chip and shrink detail text as width shrinks
   const includeModel = width >= 80;
+  const includeEffort = width >= 60 && !!effort;
   const includeScopeDetail = width >= 60 ? 28 : width >= 40 ? 16 : 8;
   const includeModelDetail = width >= 100 ? 18 : width >= 80 ? 12 : 6;
 
@@ -37,6 +40,9 @@ export const ModeChips: React.FC<ModeChipsProps> = ({
     { label: 'scope', on: !!scope, detail: scope ? truncate(scope, includeScopeDetail) : 'none' },
     { label: 'perm', on: permissionMode === 'allow', detail: permissionMode },
   ];
+  if (includeEffort) {
+    chips.push({ label: 'effort', on: effort === 'high' || effort === 'xhigh' || effort === 'max' || effort === 'ultramax', warn: effort === 'max' || effort === 'ultramax', detail: effort });
+  }
   if (includeModel) {
     chips.push({ label: 'model', on: false, detail: truncate(model, includeModelDetail) });
   }

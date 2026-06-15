@@ -592,6 +592,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
     workdir: config.workdir,
     model: currentModel,
     provider: currentProvider,
+    effort: (config as any).effort,
   };
 
   return (
@@ -639,6 +640,11 @@ export const ModernApp: React.FC<ModernAppProps> = ({
             },
             onGetScope: () => scope,
             onGetAutonomous: () => autonomous,
+            onGetEffort: () => (config as any).effort || 'medium',
+            onSetEffort: (e: string) => {
+              (config as any).effort = e;
+              pushToast('success', `Effort → ${e}`);
+            },
             onShowSessionResume: openSessionResume,
             onSetPermissionMode: (mode: PermissionMode) => {
               tools.setPermissionMode(mode);
