@@ -44,6 +44,14 @@ export interface SlashCommandContext {
   onGetAutonomous?: () => boolean;
   /** Open the session resume picker (OpenCode-style). */
   onShowSessionResume?: () => void;
+  /** Open the provider picker (OpenCode-style, Ctrl+P). */
+  onOpenProviderPicker?: () => void;
+  /** Open the model picker (OpenCode-style, Ctrl+T). */
+  onOpenModelPicker?: () => void;
+  /** Open the scope picker (OpenCode-style, Ctrl+E). */
+  onOpenScopePicker?: () => void;
+  /** Open the permission picker (OpenCode-style, Ctrl+Shift+P). */
+  onOpenPermissionPicker?: () => void;
   /** Persist config to disk. */
   onPersistConfig?: () => void;
 }
@@ -222,8 +230,8 @@ function cmdHelp(): SlashCommandResult {
   msg += `\n${gradient('Keyboard Shortcuts', theme.info, theme.lavender)}\n`;
   msg += `${fg(theme.fgDim, '─'.repeat(60))}\n`;
   msg += `  ${fg(theme.primary, 'Ctrl+P'.padEnd(12))} ${fg(theme.fgDim, 'switch provider (interactive picker)')}\n`;
-  msg += `  ${fg(theme.primary, 'Ctrl+M'.padEnd(12))} ${fg(theme.fgDim, 'switch model (interactive picker)')}\n`;
-  msg += `  ${fg(theme.primary, 'Ctrl+S'.padEnd(12))} ${fg(theme.fgDim, 'set scope (restrict edits to a path)')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+T'.padEnd(12))} ${fg(theme.fgDim, 'switch model (interactive picker)')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+E'.padEnd(12))} ${fg(theme.fgDim, 'set scope (restrict edits to a path)')}\n`;
   msg += `  ${fg(theme.primary, 'Ctrl+K'.padEnd(12))} ${fg(theme.fgDim, 'command palette (all actions)')}\n`;
   msg += `  ${fg(theme.primary, 'Ctrl+L'.padEnd(12))} ${fg(theme.fgDim, 'toggle activity panel')}\n`;
   msg += `  ${fg(theme.primary, 'Ctrl+Shift+P'.padEnd(12))} ${fg(theme.fgDim, 'change permission mode')}\n`;
@@ -287,6 +295,11 @@ function cmdCompact(ctx: SlashCommandContext): SlashCommandResult {
 
 function cmdModel(args: string[], ctx: SlashCommandContext): SlashCommandResult {
   if (args.length === 0) {
+    // No args → open the interactive model picker (OpenCode-style)
+    if (ctx.onOpenModelPicker) {
+      ctx.onOpenModelPicker();
+      return { handled: true }; // no toast — picker is the UX
+    }
     return {
       handled: true,
       message:
@@ -409,6 +422,11 @@ function cmdProvider(args: string[], ctx: SlashCommandContext): SlashCommandResu
   const known = listProviders().map((p) => p.id);
 
   if (args.length === 0) {
+    // No args → open the interactive provider picker (OpenCode-style)
+    if (ctx.onOpenProviderPicker) {
+      ctx.onOpenProviderPicker();
+      return { handled: true }; // no toast — picker is the UX
+    }
     let msg = `\n${gradient('LLM Provider', theme.primary, theme.secondary)}\n`;
     msg += `${fg(theme.fgDim, '─'.repeat(60))}\n`;
     msg += `  ${fg(theme.accent, 'Current:  ')} ${fg(theme.primary, current)}\n`;
@@ -499,6 +517,11 @@ function cmdScope(args: string[], ctx: SlashCommandContext): SlashCommandResult 
   const current = ctx.onGetScope ? ctx.onGetScope() : null;
 
   if (args.length === 0) {
+    // No args → open the interactive scope picker (OpenCode-style)
+    if (ctx.onOpenScopePicker) {
+      ctx.onOpenScopePicker();
+      return { handled: true }; // no toast — picker is the UX
+    }
     let msg = `\n${gradient('File Scope', theme.primary, theme.secondary)}\n`;
     msg += `${fg(theme.fgDim, '─'.repeat(60))}\n`;
     if (current) {
@@ -639,6 +662,11 @@ function cmdActivity(ctx: SlashCommandContext): SlashCommandResult {
 function cmdPermissions(args: string[], ctx: SlashCommandContext): SlashCommandResult {
   const modes = ['read-only', 'workspace-write', 'danger-full-access', 'prompt', 'allow'];
   if (args.length === 0) {
+    // No args → open the interactive permission picker (OpenCode-style)
+    if (ctx.onOpenPermissionPicker) {
+      ctx.onOpenPermissionPicker();
+      return { handled: true }; // no toast — picker is the UX
+    }
     const current = ctx.tools.getPermissionMode();
     let msg = `\n${gradient('Permission Modes', theme.primary, theme.secondary)}\n`;
     msg += `${fg(theme.fgDim, '─'.repeat(60))}\n`;

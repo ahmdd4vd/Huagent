@@ -109,7 +109,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   const [scope, setScope] = useState<string | null>(config.scope ?? null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
-  // ── Picker state (Ctrl+P/Ctrl+M/... open this) ───────────────
+  // ── Picker state (Ctrl+P/Ctrl+T/... open this) ───────────────
   type PickerMode = 'provider' | 'model' | 'scope' | 'permission' | 'engine' | null;
   const [picker, setPicker] = useState<{ mode: PickerMode; items: PickerItem[]; title: string; onSelect: (id: string) => void } | null>(null);
 
@@ -173,100 +173,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
     }
   }, [autonomous]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Slash command handler ────────────────────────────────────
-  const handleSlashCommand = useCallback(async (text: string) => {
-    const parts = text.slice(1).split(/\s+/);
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1);
-    const ctx: SlashCommandContext = {
-      messages: messagesRef.current as any,
-      llm: client,
-      memory,
-      tools,
-      sessions,
-      workdir: config.workdir,
-      config,
-      onToggleAutonomous: () => {
-        setAutonomous((a) => !a);
-        return !autonomousRef.current;
-      },
-      onSetScope: (s: string | undefined) => {
-        const next = s ?? null;
-        setScope(next);
-        return next;
-      },
-      onGetScope: () => scope,
-      onGetAutonomous: () => autonomous,
-      onSetPermissionMode: (mode: PermissionMode) => {
-        tools.setPermissionMode(mode);
-        setPermissionMode(mode);
-      },
-      onClear: () => setMessages([]),
-    };
-    const result = await executeSlashCommand(cmd, args, ctx);
-    if (result.message) {
-      pushToast(result.clearMessages ? 'info' : 'success', result.message);
-    }
-    if (result.exit) {
-      onExit?.();
-      exit();
-    }
-  }, [config, tools, memory, sessions, onExit, exit, pushToast, scope, autonomous]);
-
-  // ── Submit handler ───────────────────────────────────────────
-  const handleSubmit = useCallback(async (text: string) => {
-    if (!text.trim() || isThinking || isStreaming) return;
-    const userMsg = text.trim();
-    setInput('');
-    setSuggestions([]);
-
-    if (userMsg.startsWith('/')) {
-      await handleSlashCommand(userMsg);
-      return;
-    }
-
-    setIsThinking(true);
-    setIsStreaming(true);
-    setStreamingText('');
-
-    // Add user message
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: userMsg,
-      timestamp: Date.now(),
-    };
-    setMessages((m) => [...m, userMessage]);
-
-    try {
-      // Use activity store to track this conversation
-      const store = getActivityStore();
-      store.start('message', `user: ${userMsg.slice(0, 80)}`);
-
-      // Use the engine
-      const fullResponse = await onSubmit(userMsg);
-
-      // Add assistant message
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: fullResponse,
-        timestamp: Date.now(),
-      };
-      setMessages((m) => [...m, assistantMessage]);
-      setStreamingText('');
-      store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'success', {
-        summary: 'message complete',
-      });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      pushToast('error', `Error: ${message}`);
-    } finally {
-      setIsThinking(false);
-      setIsStreaming(false);
-      setStreamingText('');
-    }
-  }, [isThinking, isStreaming, handleSlashCommand, onSubmit, pushToast]);
+  // (handleSubmit moved below — it needs handleSlashCommand which is defined later)
 
   // ── Tab completion ───────────────────────────────────────────
   const handleTabCompletion = useCallback(() => {
@@ -279,6 +186,36 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   // ── Live model/provider state (mutated by picker + /model + /provider) ──
   const [currentProvider, setCurrentProvider] = useState<string>(config.provider || 'anthropic');
   const [currentModel, setCurrentModel] = useState<string>(config.model || '');
+
+  // ── Session resume picker ─────────────────────────────────────
+  const [showSessionResume, setShowSessionResume] = useState(false);
+  const openSessionResume = useCallback(() => {
+    setShowSessionResume(true);
+  }, []);
+  const sessionViews: SessionView[] = useMemo(() => {
+    if (!sessions || typeof (sessions as any).list !== 'function') return [];
+    const list = (sessions as any).list() as any[];
+    return list.map((s) => ({
+      id: s.id,
+      startTime: s.startTime || 0,
+      endTime: s.endTime,
+      projectPath: s.projectPath || '',
+      summary: s.summary || '',
+      messageCount: (s.messages || []).length,
+      model: s.metadata?.model,
+      provider: s.metadata?.provider,
+    }));
+  }, [sessions, showSessionResume]);
+  const closeSessionResume = useCallback(() => setShowSessionResume(false), []);
+  const handleSessionSelect = useCallback((id: string) => {
+    const s = (sessions as any).load?.(id);
+    if (s) {
+      setMessages(s.messages || []);
+      pushToast('success', `Resumed session: ${id.slice(0, 8)}`);
+      dialogController.publishEvent({ type: 'session_resumed', sessionId: id, messageCount: (s.messages || []).length });
+    }
+    setShowSessionResume(false);
+  }, [sessions, pushToast, dialogController]);
 
   // ── Picker openers ───────────────────────────────────────────
   const openProviderPicker = useCallback(() => {
@@ -435,6 +372,148 @@ export const ModernApp: React.FC<ModernAppProps> = ({
 
   const closePicker = useCallback(() => setPicker(null), []);
 
+  // ── Slash command handler ────────────────────────────────────
+  const handleSlashCommand = useCallback(async (text: string) => {
+    const parts = text.slice(1).split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const args = parts.slice(1);
+    const ctx: SlashCommandContext = {
+      messages: messagesRef.current as any,
+      llm: client,
+      memory,
+      tools,
+      sessions,
+      workdir: config.workdir,
+      config,
+      onToggleAutonomous: () => {
+        setAutonomous((a) => !a);
+        return !autonomousRef.current;
+      },
+      onSetScope: (s: string | undefined) => {
+        const next = s ?? null;
+        setScope(next);
+        return next;
+      },
+      onGetScope: () => scope,
+      onGetAutonomous: () => autonomous,
+      onSetPermissionMode: (mode: PermissionMode) => {
+        tools.setPermissionMode(mode);
+        setPermissionMode(mode);
+      },
+      onClear: () => setMessages([]),
+      // Picker openers — wire to React state
+      onOpenProviderPicker: openProviderPicker,
+      onOpenModelPicker: openModelPicker,
+      onOpenScopePicker: openScopePicker,
+      onOpenPermissionPicker: openPermissionPicker,
+      onShowSessionResume: openSessionResume,
+    };
+    const result = await executeSlashCommand(cmd, args, ctx);
+    if (result.message) {
+      pushToast(result.clearMessages ? 'info' : 'success', result.message);
+    }
+    if (result.exit) {
+      onExit?.();
+      exit();
+    }
+    // Always clear input after slash command (the picker is the new UX, or the toast confirms)
+    setInput('');
+    setSuggestions([]);
+  }, [config, tools, memory, sessions, onExit, exit, pushToast, scope, autonomous, openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, openSessionResume]);
+
+  // ── Command palette: lets the user pick any slash action via Ctrl+K ──
+  const openCommandPalette = useCallback(() => {
+    const items: PickerItem[] = [
+      { id: 'pick:provider', label: '/provider', detail: 'switch LLM provider', meta: 'Ctrl+P' },
+      { id: 'pick:model', label: '/model', detail: 'switch model', meta: 'Ctrl+T' },
+      { id: 'pick:scope', label: '/scope', detail: 'restrict to a path', meta: 'Ctrl+E' },
+      { id: 'pick:permission', label: '/permissions', detail: 'change permission mode', meta: 'Ctrl+Shift+P' },
+      { id: 'pick:session', label: '/resume', detail: 'resume a previous session', meta: 'Ctrl+R' },
+      { id: '/autonomous', label: '/autonomous', detail: 'toggle autonomous mode', meta: 'Ctrl+A' },
+      { id: '/clear', label: '/clear', detail: 'clear messages', meta: 'Ctrl+L' },
+      { id: '/status', label: '/status', detail: 'show session status', meta: 'Ctrl+I' },
+      { id: '/cost', label: '/cost', detail: 'token usage and cost' },
+      { id: '/memory', label: '/memory', detail: 'memory statistics' },
+      { id: '/skills', label: '/skills', detail: 'list learned skills' },
+      { id: '/doctor', label: '/doctor', detail: 'run diagnostics' },
+      { id: '/exit', label: '/exit', detail: 'quit', meta: 'Ctrl+D' },
+    ];
+    setPicker({
+      mode: 'engine',
+      title: 'Command Palette',
+      items,
+      onSelect: (id: string) => {
+        setPicker(null);
+        if (id.startsWith('pick:')) {
+          const which = id.slice(5);
+          if (which === 'provider') openProviderPicker();
+          else if (which === 'model') openModelPicker();
+          else if (which === 'scope') openScopePicker();
+          else if (which === 'permission') openPermissionPicker();
+          else if (which === 'session') openSessionResume();
+        } else {
+          // Run the slash command
+          handleSlashCommand(id);
+        }
+      },
+    });
+  }, [openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, openSessionResume, handleSlashCommand]);
+
+  // ── Submit handler ───────────────────────────────────────────
+  const handleSubmit = useCallback(async (text: string) => {
+    if (!text.trim() || isThinking || isStreaming) return;
+    const userMsg = text.trim();
+    setInput('');
+    setSuggestions([]);
+
+    if (userMsg.startsWith('/')) {
+      await handleSlashCommand(userMsg);
+      return;
+    }
+
+    setIsThinking(true);
+    setIsStreaming(true);
+    setStreamingText('');
+
+    // Add user message
+    const userMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: userMsg,
+      timestamp: Date.now(),
+    };
+    setMessages((m) => [...m, userMessage]);
+
+    try {
+      // Use activity store to track this conversation
+      const store = getActivityStore();
+      store.start('message', `user: ${userMsg.slice(0, 80)}`);
+
+      // Use the engine
+      const fullResponse = await onSubmit(userMsg);
+
+      // Add assistant message
+      const assistantMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: fullResponse,
+        timestamp: Date.now(),
+      };
+      setMessages((m) => [...m, assistantMessage]);
+      setStreamingText('');
+      store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'success', {
+        summary: 'message complete',
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      pushToast('error', `Error: ${message}`);
+    } finally {
+      setIsThinking(false);
+      setIsStreaming(false);
+      setStreamingText('');
+    }
+  }, [isThinking, isStreaming, handleSlashCommand, onSubmit, pushToast]);
+
   // ── Engine event subscription: forward to activity store + log to console ──
   useEffect(() => {
     return dialogController.subscribeEvents((event: EngineEvent) => {
@@ -469,74 +548,6 @@ export const ModernApp: React.FC<ModernAppProps> = ({
       }
     });
   }, [dialogController, pushToast]);
-
-  // ── Session resume picker ─────────────────────────────────────
-  const [showSessionResume, setShowSessionResume] = useState(false);
-  const openSessionResume = useCallback(() => {
-    setShowSessionResume(true);
-  }, []);
-  const sessionViews: SessionView[] = useMemo(() => {
-    if (!sessions || typeof (sessions as any).list !== 'function') return [];
-    const list = (sessions as any).list() as any[];
-    return list.map((s) => ({
-      id: s.id,
-      startTime: s.startTime || 0,
-      endTime: s.endTime,
-      projectPath: s.projectPath || '',
-      summary: s.summary || '',
-      messageCount: (s.messages || []).length,
-      model: s.metadata?.model,
-      provider: s.metadata?.provider,
-    }));
-  }, [sessions, showSessionResume]);
-  const closeSessionResume = useCallback(() => setShowSessionResume(false), []);
-  const handleSessionSelect = useCallback((id: string) => {
-    const s = (sessions as any).load?.(id);
-    if (s) {
-      setMessages(s.messages || []);
-      pushToast('success', `Resumed session: ${id.slice(0, 8)}`);
-      dialogController.publishEvent({ type: 'session_resumed', sessionId: id, messageCount: (s.messages || []).length });
-    }
-    setShowSessionResume(false);
-  }, [sessions, pushToast, dialogController]);
-
-  // ── Command palette: lets the user pick any slash action via Ctrl+K ──
-  const openCommandPalette = useCallback(() => {
-    const items: PickerItem[] = [
-      { id: 'pick:provider', label: '/provider', detail: 'switch LLM provider', meta: 'Ctrl+P' },
-      { id: 'pick:model', label: '/model', detail: 'switch model', meta: 'Ctrl+M' },
-      { id: 'pick:scope', label: '/scope', detail: 'restrict to a path', meta: 'Ctrl+S' },
-      { id: 'pick:permission', label: '/permissions', detail: 'change permission mode', meta: 'Ctrl+Shift+P' },
-      { id: 'pick:session', label: '/resume', detail: 'resume a previous session', meta: 'Ctrl+R' },
-      { id: '/autonomous', label: '/autonomous', detail: 'toggle autonomous mode', meta: 'Ctrl+A' },
-      { id: '/clear', label: '/clear', detail: 'clear messages', meta: 'Ctrl+L' },
-      { id: '/status', label: '/status', detail: 'show session status', meta: 'Ctrl+I' },
-      { id: '/cost', label: '/cost', detail: 'token usage and cost' },
-      { id: '/memory', label: '/memory', detail: 'memory statistics' },
-      { id: '/skills', label: '/skills', detail: 'list learned skills' },
-      { id: '/doctor', label: '/doctor', detail: 'run diagnostics' },
-      { id: '/exit', label: '/exit', detail: 'quit', meta: 'Ctrl+D' },
-    ];
-    setPicker({
-      mode: 'engine',
-      title: 'Command Palette',
-      items,
-      onSelect: (id: string) => {
-        setPicker(null);
-        if (id.startsWith('pick:')) {
-          const which = id.slice(5);
-          if (which === 'provider') openProviderPicker();
-          else if (which === 'model') openModelPicker();
-          else if (which === 'scope') openScopePicker();
-          else if (which === 'permission') openPermissionPicker();
-          else if (which === 'session') openSessionResume();
-        } else {
-          // Run the slash command
-          handleSlashCommand(id);
-        }
-      },
-    });
-  }, [openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, openSessionResume, handleSlashCommand]);
 
   // ── Dialog state computation ─────────────────────────────────
   // Priority: question > plan > permission > session-resume > picker
@@ -667,6 +678,11 @@ export const ModernApp: React.FC<ModernAppProps> = ({
               } catch {}
             },
             onClear: () => setMessages([]),
+            // Picker openers — wire to React state
+            onOpenProviderPicker: openProviderPicker,
+            onOpenModelPicker: openModelPicker,
+            onOpenScopePicker: openScopePicker,
+            onOpenPermissionPicker: openPermissionPicker,
           };
           const result = await executeSlashCommand(cmd, args, ctx);
           if (result.message) pushToast(result.clearMessages ? 'info' : 'success', result.message);

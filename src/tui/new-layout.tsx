@@ -183,12 +183,27 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
       onToggleActivity();
       return;
     }
-    // Esc closes picker
-    if (key.escape && picker) {
-      picker.onCancel();
-      return;
+    // Esc closes picker OR dialog
+    if (key.escape) {
+      if (picker) {
+        picker.onCancel();
+        return;
+      }
+      if (dialog) {
+        // For picker-typed dialog, cancel via picker.onCancel
+        if (dialog.type === 'picker' && (dialog as any).picker) {
+          (dialog as any).picker.onCancel();
+        } else if (dialog.type === 'plan') {
+          (dialog as any).onReject?.();
+        } else if (dialog.type === 'permission') {
+          (dialog as any).onDecide?.('deny');
+        } else if ((dialog as any).onCancel) {
+          (dialog as any).onCancel();
+        }
+        return;
+      }
     }
-    // Ctrl+K — command palette
+    // Ctrl+K — command palette (works as inputChar 'k' in raw mode)
     if (key.ctrl && (inputChar === 'k' || key.tab)) {
       onOpenCommandPalette();
       return;
@@ -199,22 +214,27 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
       onOpenProviderPicker();
       return;
     }
-    // Ctrl+M — model picker
-    if (key.ctrl && inputChar === 'm') {
+    // Ctrl+T — model picker. We use Ctrl+T (0x14) instead of Ctrl+M
+    // (0x0D) because Ctrl+M is the same as Enter in terminal control codes
+    // and Ink's readline interprets it as such.
+    if (key.ctrl && inputChar === 't') {
       onOpenModelPicker();
       return;
     }
-    // Ctrl+S — scope picker
-    if (key.ctrl && inputChar === 's' && !key.downArrow) {
+    // Ctrl+E — scope picker. We use Ctrl+E (0x05) instead of Ctrl+S
+    // (0x13) because Ctrl+S is XOFF (software flow control) and many
+    // terminals intercept it before the application sees it.
+    if (key.ctrl && inputChar === 'e') {
       onOpenScopePicker();
       return;
     }
-    // Ctrl+Shift+P — permission picker
+    // Ctrl+Shift+P — permission picker (works on most terminals)
     if (key.ctrl && key.shift && (inputChar === 'p' || inputChar === 'P')) {
       onOpenPermissionPicker();
       return;
     }
-    // Ctrl+R — session resume
+    // Ctrl+R — session resume (works in raw mode; bash readline's
+    // reverse-search doesn't apply since ink sets raw mode)
     if (key.ctrl && inputChar === 'r' && !key.shift) {
       onOpenSessionResume();
       return;
@@ -420,9 +440,9 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
             {theme.fgSubtle && '⌨  '}
             <Text color={theme.fgSubtle}>Ctrl+P</Text> provider
             {'  ·  '}
-            <Text color={theme.fgSubtle}>Ctrl+M</Text> model
+            <Text color={theme.fgSubtle}>Ctrl+T</Text> model
             {'  ·  '}
-            <Text color={theme.fgSubtle}>Ctrl+S</Text> scope
+            <Text color={theme.fgSubtle}>Ctrl+E</Text> scope
             {'  ·  '}
             <Text color={theme.fgSubtle}>Ctrl+R</Text> resume
             {'  ·  '}
