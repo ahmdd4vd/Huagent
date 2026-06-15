@@ -22,7 +22,7 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "snapshot:tui": "node snapshot.mjs full",
+    "snapshot:tui": "node scripts/snapshot.mjs full",
     "verify": "npm run lint && npm run test && npm run build",
     "prepublishOnly": "npm run verify"
   },

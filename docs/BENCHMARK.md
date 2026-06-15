@@ -91,7 +91,7 @@ Assuming 1M tokens = $3 (mix of haiku + sonnet).
 
 ## E2E Test Results
 
-All 51 tests pass in <120 seconds (test-v4-e2e-final.ts):
+All 51 tests pass in <120 seconds (scripts/v4-exploration/test-v4-e2e-final.ts):
 
 | # | Test | Status |
 |---|---|---|
@@ -174,14 +174,14 @@ cd huagent
 npm install
 
 # Run unit tests (each phase)
-npx tsx test-v4-phase1.ts
-npx tsx test-v4-phase2.ts
-npx tsx test-v4-phase3.ts
-npx tsx test-v4-phase4.ts
+npx tsx scripts/v4-exploration/test-v4-phase1.ts
+npx tsx scripts/v4-exploration/test-v4-phase2.ts
+npx tsx scripts/v4-exploration/test-v4-phase3.ts
+npx tsx scripts/v4-exploration/test-v4-phase4.ts
 
 # Run E2E tests
 export TOKENROUTER_API_KEY=*** TOKENROUTER_API_KEY /root/.hermes/.env | cut -d= -f2)
-npx tsx test-v4-e2e-final.ts
+npx tsx scripts/v4-exploration/test-v4-e2e-final.ts
 ```
 
 ## Future Benchmarks

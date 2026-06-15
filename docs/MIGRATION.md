@@ -245,7 +245,7 @@ Run the E2E tests to verify both engines work:
 npx tsx test-v3-e2e.ts
 
 # v4.0 tests
-npx tsx test-v4-e2e-final.ts
+npx tsx scripts/v4-exploration/test-v4-e2e-final.ts
 ```
 
 ## Need Help?
