@@ -12,14 +12,26 @@
  *   - We want the "elegant, modern, restrained" aesthetic David asked for
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useApp } from 'ink';
 import { NewLayout, type ChatMessage, type SessionStats, type SessionConfig, type ToastItem } from './new-layout.js';
 import { Picker, type PickerItem } from './picker.js';
+import { QuestionPrompt } from './question-prompt.js';
+import { PlanMode, type PlanView } from './plan-mode.js';
+import { ToolConfirmation } from './tool-confirmation.js';
+import { SessionResume, buildSessionItems, type SessionView } from './session-resume.js';
 import { completeSlashCommand, executeSlashCommand, type SlashCommandContext } from '../slash-commands.js';
 import { getActivityStore } from './activity-store.js';
 import { listProviders, PROVIDERS, type ProviderId } from '../providers/registry.js';
 import { getModels } from '../providers/models.js';
+import { getDialogController, type DialogState } from './dialog-controller.js';
+import type {
+  QuestionRequest,
+  PermissionRequest,
+  PermissionDecisionType,
+  EngineEvent,
+  Plan,
+} from '../engine/core.js';
 
 // ─── Engine/Client/Tools interfaces ────────────────────────────
 // We use structural types (just what we need) instead of `any` to catch
@@ -100,6 +112,22 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   // ── Picker state (Ctrl+P/Ctrl+M/... open this) ───────────────
   type PickerMode = 'provider' | 'model' | 'scope' | 'permission' | 'engine' | null;
   const [picker, setPicker] = useState<{ mode: PickerMode; items: PickerItem[]; title: string; onSelect: (id: string) => void } | null>(null);
+
+  // ── Modal dialogs (question, plan, permission, session-resume) ──
+  // Sourced from the DialogController singleton — the engine calls
+  // controller.askUser/requestPermission/reviewPlan and the TUI shows
+  // the dialog + resolves the Promise when the user picks.
+  const [dialogState, setDialogState] = useState<DialogState>({
+    question: null,
+    permission: null,
+    plan: null,
+  });
+  const dialogController = useMemo(() => getDialogController(), []);
+  useEffect(() => {
+    return dialogController.subscribe(() => {
+      setDialogState(dialogController.getState());
+    });
+  }, [dialogController]);
 
   // ── Refs for closures that need current state ────────────────
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -407,6 +435,71 @@ export const ModernApp: React.FC<ModernAppProps> = ({
 
   const closePicker = useCallback(() => setPicker(null), []);
 
+  // ── Engine event subscription: forward to activity store + log to console ──
+  useEffect(() => {
+    return dialogController.subscribeEvents((event: EngineEvent) => {
+      // Log to activity store so it shows up in the activity feed
+      const store = getActivityStore();
+      switch (event.type) {
+        case 'plan_created':
+          store.start('plan', `Plan: ${(event.plan?.steps || []).length} steps`);
+          break;
+        case 'plan_approved':
+          store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'success', { summary: 'Plan approved' });
+          break;
+        case 'plan_rejected':
+          store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'error', { summary: 'Plan rejected' });
+          break;
+        case 'step_start':
+          store.start('verify', event.step?.description || event.step?.id || 'step');
+          break;
+        case 'step_done':
+          store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'success', { summary: 'done' });
+          break;
+        case 'step_failed':
+          store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'error', { summary: event.error });
+          pushToast('error', `Step failed: ${event.error.slice(0, 80)}`);
+          break;
+        case 'tool_call':
+          store.start('bash', `${event.call.name}(${JSON.stringify(event.call.args || {}).slice(0, 60)})`);
+          break;
+        case 'tool_result':
+          store.finish(store.getState().activities[store.getState().activities.length - 1]?.id ?? '', 'success', { summary: 'ok' });
+          break;
+      }
+    });
+  }, [dialogController, pushToast]);
+
+  // ── Session resume picker ─────────────────────────────────────
+  const [showSessionResume, setShowSessionResume] = useState(false);
+  const openSessionResume = useCallback(() => {
+    setShowSessionResume(true);
+  }, []);
+  const sessionViews: SessionView[] = useMemo(() => {
+    if (!sessions || typeof (sessions as any).list !== 'function') return [];
+    const list = (sessions as any).list() as any[];
+    return list.map((s) => ({
+      id: s.id,
+      startTime: s.startTime || 0,
+      endTime: s.endTime,
+      projectPath: s.projectPath || '',
+      summary: s.summary || '',
+      messageCount: (s.messages || []).length,
+      model: s.metadata?.model,
+      provider: s.metadata?.provider,
+    }));
+  }, [sessions, showSessionResume]);
+  const closeSessionResume = useCallback(() => setShowSessionResume(false), []);
+  const handleSessionSelect = useCallback((id: string) => {
+    const s = (sessions as any).load?.(id);
+    if (s) {
+      setMessages(s.messages || []);
+      pushToast('success', `Resumed session: ${id.slice(0, 8)}`);
+      dialogController.publishEvent({ type: 'session_resumed', sessionId: id, messageCount: (s.messages || []).length });
+    }
+    setShowSessionResume(false);
+  }, [sessions, pushToast, dialogController]);
+
   // ── Command palette: lets the user pick any slash action via Ctrl+K ──
   const openCommandPalette = useCallback(() => {
     const items: PickerItem[] = [
@@ -414,6 +507,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
       { id: 'pick:model', label: '/model', detail: 'switch model', meta: 'Ctrl+M' },
       { id: 'pick:scope', label: '/scope', detail: 'restrict to a path', meta: 'Ctrl+S' },
       { id: 'pick:permission', label: '/permissions', detail: 'change permission mode', meta: 'Ctrl+Shift+P' },
+      { id: 'pick:session', label: '/resume', detail: 'resume a previous session', meta: 'Ctrl+R' },
       { id: '/autonomous', label: '/autonomous', detail: 'toggle autonomous mode', meta: 'Ctrl+A' },
       { id: '/clear', label: '/clear', detail: 'clear messages', meta: 'Ctrl+L' },
       { id: '/status', label: '/status', detail: 'show session status', meta: 'Ctrl+I' },
@@ -435,13 +529,52 @@ export const ModernApp: React.FC<ModernAppProps> = ({
           else if (which === 'model') openModelPicker();
           else if (which === 'scope') openScopePicker();
           else if (which === 'permission') openPermissionPicker();
+          else if (which === 'session') openSessionResume();
         } else {
           // Run the slash command
           handleSlashCommand(id);
         }
       },
     });
-  }, [openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, handleSlashCommand]);
+  }, [openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, openSessionResume, handleSlashCommand]);
+
+  // ── Dialog state computation ─────────────────────────────────
+  // Priority: question > plan > permission > session-resume > picker
+  const activeDialog = useMemo(() => {
+    if (dialogState.question) {
+      return {
+        type: 'question' as const,
+        request: dialogState.question.request,
+        onSubmit: (answers: string[][]) => dialogController.resolveQuestion(answers),
+        onCancel: () => dialogController.rejectQuestion(),
+      };
+    }
+    if (dialogState.plan) {
+      return {
+        type: 'plan' as const,
+        plan: dialogState.plan.plan as any,
+        onApprove: () => dialogController.resolvePlan('approve'),
+        onReject: () => dialogController.resolvePlan('reject'),
+        onEdit: (_feedback: string) => dialogController.resolvePlan('edit'),
+      };
+    }
+    if (dialogState.permission) {
+      return {
+        type: 'permission' as const,
+        request: dialogState.permission.request,
+        onDecide: (d: PermissionDecisionType) => dialogController.resolvePermission(d),
+      };
+    }
+    if (showSessionResume) {
+      return {
+        type: 'session' as const,
+        sessions: sessionViews,
+        onSelect: handleSessionSelect,
+        onCancel: closeSessionResume,
+      };
+    }
+    return null;
+  }, [dialogState, dialogController, showSessionResume, sessionViews, handleSessionSelect, closeSessionResume]);
 
   // ── Session config (reactive to picker changes) ──────────────
   const sessionConfig: SessionConfig = {
@@ -495,6 +628,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
             },
             onGetScope: () => scope,
             onGetAutonomous: () => autonomous,
+            onShowSessionResume: openSessionResume,
             onSetPermissionMode: (mode: PermissionMode) => {
               tools.setPermissionMode(mode);
               setPermissionMode(mode);
@@ -542,21 +676,26 @@ export const ModernApp: React.FC<ModernAppProps> = ({
         onToggleActivity={() => setShowActivity((s) => !s)}
         onExit={() => { onExit?.(); exit(); }}
         onShowHelp={() => pushToast('info', 'Type /help for all commands')}
-        picker={
-          picker
-            ? {
-                title: picker.title,
-                items: picker.items,
-                onSelect: picker.onSelect,
-                onCancel: closePicker,
-              }
-            : null
-        }
+        picker={picker ? { title: picker.title, items: picker.items, onSelect: picker.onSelect, onCancel: closePicker } : null}
         onOpenProviderPicker={openProviderPicker}
         onOpenModelPicker={openModelPicker}
         onOpenScopePicker={openScopePicker}
         onOpenPermissionPicker={openPermissionPicker}
         onOpenCommandPalette={openCommandPalette}
+        onOpenSessionResume={openSessionResume}
+        dialog={
+          activeDialog
+            ? (activeDialog.type === 'question'
+                ? { type: 'question' as const, request: activeDialog.request, onSubmit: activeDialog.onSubmit, onCancel: activeDialog.onCancel }
+                : activeDialog.type === 'plan'
+                  ? { type: 'plan' as const, plan: activeDialog.plan, onApprove: activeDialog.onApprove, onReject: activeDialog.onReject, onEdit: activeDialog.onEdit }
+                  : activeDialog.type === 'permission'
+                    ? { type: 'permission' as const, request: activeDialog.request, onDecide: activeDialog.onDecide }
+                    : activeDialog.type === 'session'
+                      ? { type: 'session' as const, sessions: activeDialog.sessions, onSelect: activeDialog.onSelect, onCancel: activeDialog.onCancel }
+                      : null)
+            : null
+        }
       />
     </>
   );

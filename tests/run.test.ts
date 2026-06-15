@@ -21,6 +21,7 @@ const TEST_FILES = [
   { file: 'tests/test-tui-stress.ts', minPass: 100 },
   { file: 'tests/test-providers.ts', minPass: 300 },
   { file: 'tests/test-picker.ts', minPass: 30 },
+  { file: 'tests/test-dialogs.ts', minPass: 40 },
 ];
 
 function runTestFile(file: string): Promise<{ stdout: string; stderr: string }> {

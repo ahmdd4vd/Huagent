@@ -475,6 +475,11 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
 
     const AppComponent = tuiMode === 'legacy' ? App : ModernApp;
 
+    // Wire the dialog controller so the TUI can pause the engine
+    // for questions / permissions / plan reviews.
+    const { getDialogController } = await import('./tui/dialog-controller.js');
+    const dialog = getDialogController();
+
     const { waitUntilExit } = render(
       React.createElement(AppComponent, {
         engine,
@@ -485,6 +490,18 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
         skills,
         config,
         onSubmit: async (msg: string) => {
+          // Wire dialog callbacks into the engine for this session.
+          // Using setOptions (not a new constructor) preserves the
+          // engine's existing state (messages, session, stats).
+          (engine as any).setOptions?.({
+            onQuestion: (req: any) => dialog.askUser(req),
+            onPermissionRequest: (req: any) => dialog.requestPermission(req),
+            onPlanReview: (plan: any) => dialog.reviewPlan(plan),
+            onEvent: (event: any) => {
+              // Forward to dialog controller (for TUI live updates)
+              dialog.publishEvent(event);
+            },
+          });
           return engine.process(msg, config.workdir);
         },
         onExit: async () => {

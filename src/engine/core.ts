@@ -24,6 +24,7 @@ import { prompts } from '../llm/prompt.js';
 import { estimateMemory, shouldCompact } from '../memory/pressure.js';
 import { summarizeConversation } from '../summary.js';
 import type { Message, Plan, PlanStep, ToolCall, TaskType, ComplexityLevel } from '../types/index.js';
+export type { Plan, PlanStep };
 import { nanoid } from 'nanoid';
 
 // ═══════════════════════════════════════════════════════════════
@@ -33,6 +34,8 @@ export type EngineEvent =
   | { type: 'stage'; stage: string; status: 'start' | 'end'; detail?: string }   // 6 stages visual
   | { type: 'thinking'; content: string }
   | { type: 'plan_created'; plan: Plan }
+  | { type: 'plan_approved'; plan: Plan }
+  | { type: 'plan_rejected'; plan: Plan; reason?: string }
   | { type: 'step_start'; step: PlanStep }
   | { type: 'step_done'; step: PlanStep; result: any }
   | { type: 'step_failed'; step: PlanStep; error: string }
@@ -45,7 +48,35 @@ export type EngineEvent =
   | { type: 'subagent_start'; id: string; subagentType: SubagentType }
   | { type: 'subagent_done'; id: string; output: string }
   | { type: 'compact'; before: number; after: number }
-  | { type: 'reflection'; learned: string };
+  | { type: 'reflection'; learned: string }
+  | { type: 'question'; request: QuestionRequest }
+  | { type: 'permission'; request: PermissionRequest }
+  | { type: 'session_resumed'; sessionId: string; messageCount: number };
+
+/** A question the model wants to ask the user mid-execution (OpenCode-style). */
+export interface QuestionRequest {
+  id: string;
+  questions: Array<{
+    question: string;
+    /** Short header for the question tab (max 12 chars) */
+    header: string;
+    options: Array<{ label: string; description?: string }>;
+    multiSelect?: boolean;
+  }>;
+}
+
+export type PermissionDecisionType = 'allow' | 'deny' | 'allow-always' | 'deny-always';
+
+/** A tool permission request — fired before executing a potentially dangerous tool. */
+export interface PermissionRequest {
+  id: string;
+  tool: string;
+  args: any;
+  /** Short human preview of what the tool will do (e.g. file path, command) */
+  preview: string;
+  /** Why this needs permission */
+  reason: string;
+}
 
 export interface EngineOptions {
   maxRefinements?: number;
@@ -55,6 +86,12 @@ export interface EngineOptions {
   enableReflection?: boolean;
   maxSteps?: number;
   onEvent?: (event: EngineEvent) => void;
+  /** Pause + ask the user a multi-option question. Returns selected labels per question. */
+  onQuestion?: (request: QuestionRequest) => Promise<string[][]>;
+  /** Pause + ask the user for tool permission. Returns their decision. */
+  onPermissionRequest?: (request: PermissionRequest) => Promise<PermissionDecisionType>;
+  /** Pause + ask the user to approve/reject a generated plan before execution. */
+  onPlanReview?: (plan: Plan) => Promise<'approve' | 'reject' | 'edit'>;
 }
 
 const STAGES = [
@@ -112,6 +149,9 @@ export class Engine {
       enableReflection: options.enableReflection ?? true,
       maxSteps: options.maxSteps ?? 15,
       onEvent: options.onEvent ?? (() => {}),
+      onQuestion: options.onQuestion ?? (async () => []),
+      onPermissionRequest: options.onPermissionRequest ?? (async () => 'allow'),
+      onPlanReview: options.onPlanReview ?? (async () => 'approve'),
     };
 
     this.currentSessionId = this.sessions.startSession(process.cwd());
@@ -121,6 +161,39 @@ export class Engine {
   setModel(model: string): void { this.client.setModel(model); }
   setProvider(providerId: string, apiKey: string, baseUrl?: string, model?: string): void {
     this.client.setProvider(providerId as any, apiKey, baseUrl, model);
+  }
+  /**
+   * Ask the user a multi-option question (paused execution). Returns
+   * the selected labels, one array per question.
+   */
+  async askUser(request: Omit<QuestionRequest, 'id'>): Promise<string[][]> {
+    const id = `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const fullRequest: QuestionRequest = { id, ...request };
+    this.options.onEvent({ type: 'question', request: fullRequest });
+    return this.options.onQuestion(fullRequest);
+  }
+  /**
+   * Request permission for a tool (paused execution). Returns the
+   * user's decision.
+   */
+  async requestPermission(
+    tool: string,
+    args: any,
+    preview: string,
+    reason: string,
+  ): Promise<PermissionDecisionType> {
+    const id = `p-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const request: PermissionRequest = { id, tool, args, preview, reason };
+    this.options.onEvent({ type: 'permission', request });
+    return this.options.onPermissionRequest(request);
+  }
+  /**
+   * Update per-call options (e.g. for the next process() invocation).
+   * The TUI uses this to inject dialog callbacks for question /
+   * permission / plan-review without having to rebuild the engine.
+   */
+  setOptions(opts: Partial<EngineOptions>): void {
+    Object.assign(this.options, opts);
   }
   getMessages(): Message[] { return this.messages; }
   getSystemPrompt(): string { return this.systemPrompt; }
@@ -167,6 +240,26 @@ export class Engine {
       // STAGE 2: 🗺️ PLAN
       // ═════════════════════════════════════════════════════════
       const plan = await this.stage2_plan(userMessage, understand);
+
+      // ── Interactive plan review (OpenCode-style) ────────────
+      // Pause here so the user can approve / reject / edit the plan
+      // before we touch any tools.
+      const review = await this.options.onPlanReview(plan);
+      if (review === 'reject') {
+        this.options.onEvent({ type: 'plan_rejected', plan, reason: 'user rejected' });
+        // Replan by re-running stage 2 with feedback
+        const replan = await this.stage2_plan(userMessage, understand);
+        Object.assign(plan, replan);
+        this.options.onEvent({ type: 'plan_approved', plan });
+      } else if (review === 'edit') {
+        // User edited — for now we accept the edited plan as-is.
+        // (Full plan-editing UI is a future enhancement; the picker
+        // already lets the user override steps via the existing model
+        // picker / scope picker / mode picker.)
+        this.options.onEvent({ type: 'plan_approved', plan });
+      } else {
+        this.options.onEvent({ type: 'plan_approved', plan });
+      }
 
       // ═════════════════════════════════════════════════════════
       // STAGE 3: ⚡ EXECUTE

@@ -63,31 +63,32 @@ export class SessionManager {
     }
   }
 
-  // List all sessions (newest first)
-  list(limit = 50): SessionData[] {
+  // List all saved sessions, newest first. Supports optional limit and project filter.
+  list(limitOrFilter?: number | { projectPath?: string; limit?: number }): SessionData[] {
     if (!existsSync(this.sessionsDir)) return [];
-
-    const files = readdirSync(this.sessionsDir)
-      .filter((f) => f.endsWith('.json'))
-      .sort()
-      .reverse()
-      .slice(0, limit);
-
-    const sessions: SessionData[] = [];
-    for (const file of files) {
-      try {
-        const data = JSON.parse(readFileSync(join(this.sessionsDir, file), 'utf-8'));
-        sessions.push(data);
-      } catch {
-        // Skip corrupted files
+    try {
+      const files = readdirSync(this.sessionsDir).filter((f) => f.endsWith('.json'));
+      const sessions: SessionData[] = [];
+      for (const f of files) {
+        const id = f.replace(/\.json$/, '');
+        const data = this.load(id);
+        if (data) sessions.push(data);
       }
-    }
-    return sessions;
-  }
+      sessions.sort((a, b) => b.startTime - a.startTime);
 
-  // Find sessions by project path
-  findByProject(projectPath: string, limit = 10): SessionData[] {
-    return this.list(100).filter((s) => s.projectPath === projectPath).slice(0, limit);
+      // Filter handling
+      let projectPath: string | undefined;
+      let limit: number = 50;
+      if (typeof limitOrFilter === 'number') limit = limitOrFilter;
+      else if (limitOrFilter && typeof limitOrFilter === 'object') {
+        projectPath = limitOrFilter.projectPath;
+        limit = limitOrFilter.limit ?? 50;
+      }
+      let result = projectPath ? sessions.filter((s) => s.projectPath === projectPath) : sessions;
+      return result.slice(0, limit);
+    } catch {
+      return [];
+    }
   }
 
   // Delete a session

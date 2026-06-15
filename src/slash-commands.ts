@@ -42,6 +42,8 @@ export interface SlashCommandContext {
   onGetScope?: () => string | null;
   /** Get current autonomous mode. */
   onGetAutonomous?: () => boolean;
+  /** Open the session resume picker (OpenCode-style). */
+  onShowSessionResume?: () => void;
   /** Persist config to disk. */
   onPersistConfig?: () => void;
 }
@@ -788,8 +790,14 @@ function cmdSessions(args: string[], ctx: SlashCommandContext): SlashCommandResu
 }
 
 function cmdResume(args: string[], ctx: SlashCommandContext): SlashCommandResult {
+  // No args: open the TUI session resume picker
   if (args.length === 0) {
-    const sessions = ctx.sessions.list(5);
+    if (ctx.onShowSessionResume) {
+      ctx.onShowSessionResume();
+      return { handled: true, message: 'Opening session resume picker…' };
+    }
+    // Fallback: list recent sessions as text
+    const sessions = (ctx.sessions as any).list ? (ctx.sessions as any).list().slice(0, 5) : ctx.sessions.list(5);
     return { handled: true, message: `Recent sessions:\n${ctx.sessions.formatList(sessions)}\n\n${fg(theme.fgDim, 'Usage: /resume <id>')}` };
   }
   const session = ctx.sessions.load(args[0]);

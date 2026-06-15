@@ -8,6 +8,10 @@ import { CompactHeader } from '/root/huagent/dist/tui/compact-header.js';
 import { ModeChips, SubagentPanel, StatusBar, Toasts } from '/root/huagent/dist/tui/status.js';
 import { ActivityFeed } from '/root/huagent/dist/tui/activity-feed.js';
 import { Picker } from '/root/huagent/dist/tui/picker.js';
+import { QuestionPrompt } from '/root/huagent/dist/tui/question-prompt.js';
+import { PlanMode } from '/root/huagent/dist/tui/plan-mode.js';
+import { ToolConfirmation } from '/root/huagent/dist/tui/tool-confirmation.js';
+import { SessionResume } from '/root/huagent/dist/tui/session-resume.js';
 import { theme } from '/root/huagent/dist/tui/theme.js';
 
 class StringWritable extends Writable {
@@ -286,6 +290,122 @@ async function main() {
             onSelect: () => {},
             onCancel: () => {},
             width: 100,
+          })
+        ),
+      )
+    );
+    console.log(out);
+  } else if (view === 'question') {
+    const out = await renderOnce(
+      React.createElement(Box, { flexDirection: 'column', paddingX: 1 },
+        React.createElement(CompactHeader, {
+          autonomous: false, scope: 'src/middleware/jwt.ts',
+          permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'anthropic',
+        }),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(QuestionPrompt, {
+            request: {
+              id: 'q1',
+              questions: [
+                { question: 'Which database should we use for the auth service?', header: 'DB',
+                  options: [
+                    { label: 'PostgreSQL', description: 'Relational, ACID, strong typing' },
+                    { label: 'MongoDB', description: 'Document store, flexible schema' },
+                    { label: 'SQLite', description: 'Embedded, no server needed' },
+                    { label: 'Redis', description: 'In-memory, blazing fast' },
+                  ]
+                },
+                { question: 'How should we hash passwords?', header: 'Hash',
+                  options: [
+                    { label: 'bcrypt', description: 'Industry standard, slow by design' },
+                    { label: 'argon2', description: 'Modern, memory-hard' },
+                    { label: 'scrypt', description: 'CPU + memory hard' },
+                  ]
+                },
+              ],
+            },
+            onSubmit: () => {},
+            onCancel: () => {},
+            width: 100,
+          })
+        ),
+      )
+    );
+    console.log(out);
+  } else if (view === 'plan') {
+    const out = await renderOnce(
+      React.createElement(Box, { flexDirection: 'column', paddingX: 1 },
+        React.createElement(CompactHeader, {
+          autonomous: false, scope: 'src/middleware/jwt.ts',
+          permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'anthropic',
+        }),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(PlanMode, {
+            plan: {
+              goal: 'Add JWT auth to express app, replace the old session thing',
+              steps: [
+                { id: '1', description: 'Read existing auth code', tool: 'read', parallel_group: 0 },
+                { id: '2', description: 'Read middleware directory structure', tool: 'bash', parallel_group: 0 },
+                { id: '3', description: 'Design JWT middleware (sign + verify)', tool: 'write', args: { path: 'src/middleware/jwt.ts' } },
+                { id: '4', description: 'Update routes to use JWT', tool: 'edit', args: { path: 'src/routes/auth.ts' } },
+                { id: '5', description: 'Add JWT tests', tool: 'write', args: { path: 'tests/jwt.test.ts' } },
+                { id: '6', description: 'Run tests + lint', tool: 'bash', args: { command: 'npm test && npm run lint' } },
+              ],
+              taskType: 'code_write',
+              complexity: 'moderate',
+            },
+            onApprove: () => {},
+            onReject: () => {},
+            onEdit: () => {},
+            width: 100,
+          })
+        ),
+      )
+    );
+    console.log(out);
+  } else if (view === 'permission') {
+    const out = await renderOnce(
+      React.createElement(Box, { flexDirection: 'column', paddingX: 1 },
+        React.createElement(CompactHeader, {
+          autonomous: false, scope: 'src/middleware/jwt.ts',
+          permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'anthropic',
+        }),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(ToolConfirmation, {
+            request: {
+              id: 'p1',
+              tool: 'bash',
+              args: { command: 'rm -rf node_modules && npm install' },
+              preview: 'rm -rf node_modules && npm install',
+              reason: 'Mutating command in workspace',
+            },
+            onDecide: () => {},
+            width: 100,
+          })
+        ),
+      )
+    );
+    console.log(out);
+  } else if (view === 'resume') {
+    const sessions = [
+      { id: 'a1b2c3d4e5f6', startTime: Date.now() - 30_000, projectPath: '/home/david/projects/huagent', summary: 'Add JWT auth to express app', messageCount: 12, model: 'MiniMax-M3', provider: 'anthropic' },
+      { id: 'b2c3d4e5f6g7', startTime: Date.now() - 7200_000, projectPath: '/home/david/projects/blog', summary: 'Write a markdown blog post about TUI design', messageCount: 4, model: 'claude-3-5-sonnet-20241022', provider: 'anthropic' },
+      { id: 'c3d4e5f6g7h8', startTime: Date.now() - 86400_000, projectPath: '/home/david/projects/api', summary: 'Refactor REST API to use middleware', messageCount: 8, model: 'gpt-4o', provider: 'openai' },
+      { id: 'd4e5f6g7h8i9', startTime: Date.now() - 172800_000, projectPath: '/home/david/projects/huagent', summary: 'Build a CLI tool for managing dotfiles', messageCount: 0, model: 'MiniMax-M3', provider: 'anthropic' },
+    ];
+    const out = await renderOnce(
+      React.createElement(Box, { flexDirection: 'column', paddingX: 1 },
+        React.createElement(CompactHeader, {
+          autonomous: false, scope: 'src/middleware/jwt.ts',
+          permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'anthropic',
+        }),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(SessionResume, {
+            sessions,
+            currentSessionId: 'a1b2c3d4e5f6',
+            onSelect: () => {},
+            onCancel: () => {},
+            width: 110,
           })
         ),
       )

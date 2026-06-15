@@ -27,6 +27,10 @@ import { SubagentPanel, StatusBar, Toasts, type ToastItem } from './status.js';
 export type { ToastItem };
 import { getActivityStore, type Activity, type SubagentState } from './activity-store.js';
 import { Picker, type PickerItem } from './picker.js';
+import { QuestionPrompt } from './question-prompt.js';
+import { PlanMode } from './plan-mode.js';
+import { ToolConfirmation } from './tool-confirmation.js';
+import { SessionResume } from './session-resume.js';
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -57,6 +61,14 @@ export interface PickerState {
   onCancel: () => void;
 }
 
+export type DialogState =
+  | { type: 'picker'; picker: PickerState }
+  | { type: 'question'; request: any; onSubmit: (answers: string[][]) => void; onCancel: () => void }
+  | { type: 'plan'; plan: any; onApprove: () => void; onReject: () => void; onEdit: (feedback: string) => void }
+  | { type: 'permission'; request: any; onDecide: (d: any) => void }
+  | { type: 'session'; sessions: any[]; onSelect: (id: string) => void; onCancel: () => void }
+  | null;
+
 export interface NewLayoutProps {
   messages: ChatMessage[];
   input: string;
@@ -84,6 +96,9 @@ export interface NewLayoutProps {
   onOpenScopePicker: () => void;
   onOpenPermissionPicker: () => void;
   onOpenCommandPalette: () => void;
+  onOpenSessionResume: () => void;
+  // New dialogs (question, plan, permission, session-resume)
+  dialog: DialogState;
 }
 
 const SLASH_COMMANDS = [
@@ -121,6 +136,8 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
   onOpenScopePicker,
   onOpenPermissionPicker,
   onOpenCommandPalette,
+  onOpenSessionResume,
+  dialog,
 }) => {
   const { exit } = useApp();
   const [frame, setFrame] = useState(0);
@@ -195,6 +212,11 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
     // Ctrl+Shift+P — permission picker
     if (key.ctrl && key.shift && (inputChar === 'p' || inputChar === 'P')) {
       onOpenPermissionPicker();
+      return;
+    }
+    // Ctrl+R — session resume
+    if (key.ctrl && inputChar === 'r' && !key.shift) {
+      onOpenSessionResume();
       return;
     }
     // If picker is open, don't process other input (picker handles it)
@@ -308,8 +330,48 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
         )}
       </Box>
 
-      {/* Picker overlay (replaces input when open) */}
-      {picker ? (
+      {/* Dialog overlay (replaces input when active) */}
+      {dialog ? (
+        <Box marginX={1} marginY={1}>
+          {dialog.type === 'picker' && dialog.picker ? (
+            <Picker
+              title={dialog.picker.title}
+              items={dialog.picker.items}
+              onSelect={dialog.picker.onSelect}
+              onCancel={dialog.picker.onCancel}
+              width={contentWidth - 4}
+            />
+          ) : dialog.type === 'question' ? (
+            <QuestionPrompt
+              request={dialog.request}
+              onSubmit={dialog.onSubmit}
+              onCancel={dialog.onCancel}
+              width={contentWidth - 4}
+            />
+          ) : dialog.type === 'plan' ? (
+            <PlanMode
+              plan={dialog.plan}
+              onApprove={dialog.onApprove}
+              onReject={dialog.onReject}
+              onEdit={dialog.onEdit}
+              width={contentWidth - 4}
+            />
+          ) : dialog.type === 'permission' ? (
+            <ToolConfirmation
+              request={dialog.request}
+              onDecide={dialog.onDecide}
+              width={contentWidth - 4}
+            />
+          ) : dialog.type === 'session' ? (
+            <SessionResume
+              sessions={dialog.sessions}
+              onSelect={dialog.onSelect}
+              onCancel={dialog.onCancel}
+              width={contentWidth - 4}
+            />
+          ) : null}
+        </Box>
+      ) : picker ? (
         <Box marginX={1} marginY={1}>
           <Picker
             title={picker.title}
@@ -352,7 +414,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
       )}
 
       {/* Keyboard shortcut hint */}
-      {!picker && (
+      {!picker && !dialog && (
         <Box paddingX={1}>
           <Text color={theme.fgSubtle} dimColor>
             {theme.fgSubtle && '⌨  '}
@@ -361,6 +423,8 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
             <Text color={theme.fgSubtle}>Ctrl+M</Text> model
             {'  ·  '}
             <Text color={theme.fgSubtle}>Ctrl+S</Text> scope
+            {'  ·  '}
+            <Text color={theme.fgSubtle}>Ctrl+R</Text> resume
             {'  ·  '}
             <Text color={theme.fgSubtle}>Ctrl+K</Text> palette
             {'  ·  '}
