@@ -26,7 +26,18 @@ import { runWithV4, formatEvent } from './engine/v4-runner.js';
 
 loadDotenv();
 
-const VERSION = '4.0.0';
+// Read version from package.json (bundled at build time)
+// Use createRequire to load from anywhere (works in both ESM and CJS)
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+let VERSION = '0.0.0';
+try {
+  const pkg = _require('../package.json');
+  VERSION = pkg.version;
+} catch {
+  // Fall back to a constant if package.json can't be read
+  VERSION = '4.1.0';
+}
 const CONFIG_DIR = join(homedir(), '.huagent');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 const MEMORY_PATH = join(CONFIG_DIR, 'memory.db');
