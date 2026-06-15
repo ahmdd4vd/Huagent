@@ -20,6 +20,7 @@ const TEST_FILES = [
   { file: 'tests/cli-commands.test.ts', minPass: 50 },
   { file: 'tests/test-tui-stress.ts', minPass: 100 },
   { file: 'tests/test-providers.ts', minPass: 300 },
+  { file: 'tests/test-picker.ts', minPass: 30 },
 ];
 
 function runTestFile(file: string): Promise<{ stdout: string; stderr: string }> {

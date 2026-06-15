@@ -26,6 +26,7 @@ import { ActivityFeed } from './activity-feed.js';
 import { SubagentPanel, StatusBar, Toasts, type ToastItem } from './status.js';
 export type { ToastItem };
 import { getActivityStore, type Activity, type SubagentState } from './activity-store.js';
+import { Picker, type PickerItem } from './picker.js';
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -49,6 +50,13 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+export interface PickerState {
+  title: string;
+  items: PickerItem[];
+  onSelect: (id: string) => void;
+  onCancel: () => void;
+}
+
 export interface NewLayoutProps {
   messages: ChatMessage[];
   input: string;
@@ -69,6 +77,13 @@ export interface NewLayoutProps {
   onToggleActivity: () => void;
   onExit: () => void;
   onShowHelp: () => void;
+  // Picker integration
+  picker: PickerState | null;
+  onOpenProviderPicker: () => void;
+  onOpenModelPicker: () => void;
+  onOpenScopePicker: () => void;
+  onOpenPermissionPicker: () => void;
+  onOpenCommandPalette: () => void;
 }
 
 const SLASH_COMMANDS = [
@@ -100,6 +115,12 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
   onToggleActivity,
   onExit,
   onShowHelp,
+  picker,
+  onOpenProviderPicker,
+  onOpenModelPicker,
+  onOpenScopePicker,
+  onOpenPermissionPicker,
+  onOpenCommandPalette,
 }) => {
   const { exit } = useApp();
   const [frame, setFrame] = useState(0);
@@ -135,6 +156,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
 
   // Keyboard
   useInput(async (inputChar, key) => {
+    // ── Global shortcuts (work whether picker is open or not) ────
     if (key.ctrl && inputChar === 'c') {
       onExit();
       exit();
@@ -142,6 +164,41 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
     }
     if (key.ctrl && inputChar === 'l') {
       onToggleActivity();
+      return;
+    }
+    // Esc closes picker
+    if (key.escape && picker) {
+      picker.onCancel();
+      return;
+    }
+    // Ctrl+K — command palette
+    if (key.ctrl && (inputChar === 'k' || key.tab)) {
+      onOpenCommandPalette();
+      return;
+    }
+    // Ctrl+P — provider picker (Ctrl+P is also up-arrow in some terminals,
+    // so we guard with !key.upArrow)
+    if (key.ctrl && inputChar === 'p' && !key.upArrow) {
+      onOpenProviderPicker();
+      return;
+    }
+    // Ctrl+M — model picker
+    if (key.ctrl && inputChar === 'm') {
+      onOpenModelPicker();
+      return;
+    }
+    // Ctrl+S — scope picker
+    if (key.ctrl && inputChar === 's' && !key.downArrow) {
+      onOpenScopePicker();
+      return;
+    }
+    // Ctrl+Shift+P — permission picker
+    if (key.ctrl && key.shift && (inputChar === 'p' || inputChar === 'P')) {
+      onOpenPermissionPicker();
+      return;
+    }
+    // If picker is open, don't process other input (picker handles it)
+    if (picker) {
       return;
     }
     if (key.return) {
@@ -251,33 +308,68 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
         )}
       </Box>
 
-      {/* Tab completion suggestions */}
-      {suggestions.length > 0 && (
-        <Box paddingX={1}>
-          <Text color={theme.lavender}>↪ </Text>
-          {suggestions.map((s, i) => (
-            <Text key={s} color={i === 0 ? theme.accent : theme.fgMuted}>
-              {i > 0 ? '  ' : ''}{s}
-            </Text>
-          ))}
+      {/* Picker overlay (replaces input when open) */}
+      {picker ? (
+        <Box marginX={1} marginY={1}>
+          <Picker
+            title={picker.title}
+            items={picker.items}
+            onSelect={picker.onSelect}
+            onCancel={picker.onCancel}
+            width={contentWidth - 4}
+          />
         </Box>
+      ) : (
+        <>
+          {/* Tab completion suggestions */}
+          {suggestions.length > 0 && (
+            <Box paddingX={1}>
+              <Text color={theme.lavender}>↪ </Text>
+              {suggestions.map((s, i) => (
+                <Text key={s} color={i === 0 ? theme.accent : theme.fgMuted}>
+                  {i > 0 ? '  ' : ''}{s}
+                </Text>
+              ))}
+            </Box>
+          )}
+
+          {/* Input */}
+          <Box borderStyle="round" borderColor={isStreaming ? theme.lavender : theme.primary} paddingX={1} marginX={1}>
+            {isThinking || isStreaming ? (
+              <Box>
+                <Text color={theme.primary}><Spinner type="dots" /></Text>
+                <Text color={theme.fgMuted}>  {autonomous ? 'Huagent is running autonomously' : 'Huagent is thinking'}…</Text>
+              </Box>
+            ) : (
+              <Box>
+                <Text color={theme.primary} bold>❯ </Text>
+                <Text color={theme.fg}>{input || <Text color={theme.fgMuted}>try "build a CLI" or /help</Text>}</Text>
+                <Text color={theme.accent}>▌</Text>
+              </Box>
+            )}
+          </Box>
+        </>
       )}
 
-      {/* Input */}
-      <Box borderStyle="round" borderColor={isStreaming ? theme.lavender : theme.primary} paddingX={1} marginX={1}>
-        {isThinking || isStreaming ? (
-          <Box>
-            <Text color={theme.primary}><Spinner type="dots" /></Text>
-            <Text color={theme.fgMuted}>  {autonomous ? 'Huagent is running autonomously' : 'Huagent is thinking'}…</Text>
-          </Box>
-        ) : (
-          <Box>
-            <Text color={theme.primary} bold>❯ </Text>
-            <Text color={theme.fg}>{input || <Text color={theme.fgMuted}>try "build a CLI" or /help</Text>}</Text>
-            <Text color={theme.accent}>▌</Text>
-          </Box>
-        )}
-      </Box>
+      {/* Keyboard shortcut hint */}
+      {!picker && (
+        <Box paddingX={1}>
+          <Text color={theme.fgSubtle} dimColor>
+            {theme.fgSubtle && '⌨  '}
+            <Text color={theme.fgSubtle}>Ctrl+P</Text> provider
+            {'  ·  '}
+            <Text color={theme.fgSubtle}>Ctrl+M</Text> model
+            {'  ·  '}
+            <Text color={theme.fgSubtle}>Ctrl+S</Text> scope
+            {'  ·  '}
+            <Text color={theme.fgSubtle}>Ctrl+K</Text> palette
+            {'  ·  '}
+            <Text color={theme.fgSubtle}>Ctrl+L</Text> activity
+            {'  ·  '}
+            <Text color={theme.fgSubtle}>?</Text> help
+          </Text>
+        </Box>
+      )}
 
       {/* Status bar (footer) */}
       <Box paddingX={1} marginTop={0}>

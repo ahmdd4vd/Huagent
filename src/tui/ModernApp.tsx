@@ -15,8 +15,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from 'ink';
 import { NewLayout, type ChatMessage, type SessionStats, type SessionConfig, type ToastItem } from './new-layout.js';
+import { Picker, type PickerItem } from './picker.js';
 import { completeSlashCommand, executeSlashCommand, type SlashCommandContext } from '../slash-commands.js';
 import { getActivityStore } from './activity-store.js';
+import { listProviders, PROVIDERS, type ProviderId } from '../providers/registry.js';
+import { getModels } from '../providers/models.js';
 
 // ─── Engine/Client/Tools interfaces ────────────────────────────
 // We use structural types (just what we need) instead of `any` to catch
@@ -61,6 +64,7 @@ export interface ConfigLike {
   workdir?: string;
   model?: string;
   provider?: string;
+  baseUrl?: string;
   autonomous?: boolean;
   scope?: string | null;
   permissionMode?: string;
@@ -92,6 +96,10 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   const [autonomous, setAutonomous] = useState<boolean>(Boolean(config.autonomous));
   const [scope, setScope] = useState<string | null>(config.scope ?? null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  // ── Picker state (Ctrl+P/Ctrl+M/... open this) ───────────────
+  type PickerMode = 'provider' | 'model' | 'scope' | 'permission' | 'engine' | null;
+  const [picker, setPicker] = useState<{ mode: PickerMode; items: PickerItem[]; title: string; onSelect: (id: string) => void } | null>(null);
 
   // ── Refs for closures that need current state ────────────────
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -240,71 +248,316 @@ export const ModernApp: React.FC<ModernAppProps> = ({
     }
   }, [input, suggestions]);
 
-  // ── Session config ───────────────────────────────────────────
+  // ── Live model/provider state (mutated by picker + /model + /provider) ──
+  const [currentProvider, setCurrentProvider] = useState<string>(config.provider || 'anthropic');
+  const [currentModel, setCurrentModel] = useState<string>(config.model || '');
+
+  // ── Picker openers ───────────────────────────────────────────
+  const openProviderPicker = useCallback(() => {
+    const providers = listProviders();
+    const items: PickerItem[] = providers.map((p) => {
+      const hasKey = Boolean(process.env[p.apiKeyEnv] || (config.baseUrl && p.id === 'custom'));
+      const keyMark = hasKey ? '✓ key set' : '○ no key';
+      return {
+        id: p.id,
+        label: p.displayName,
+        detail: p.id,
+        description: p.baseUrl,
+        meta: keyMark,
+        current: p.id === currentProvider,
+        disabled: !hasKey,
+      };
+    });
+    setPicker({
+      mode: 'provider',
+      title: 'Switch Provider',
+      items,
+      onSelect: (id: string) => {
+        const p = PROVIDERS[id as ProviderId];
+        if (!p) return;
+        // Read API key from env (or fall back to current baseUrl for custom)
+        const apiKey = process.env[p.apiKeyEnv] || '';
+        const baseUrl = process.env.HUAGENT_BASE_URL || config.baseUrl;
+        if (p.id === 'custom' && !baseUrl) {
+          pushToast('error', 'Custom provider requires HUAGENT_BASE_URL');
+          setPicker(null);
+          return;
+        }
+        if (!apiKey && p.id !== 'custom') {
+          pushToast('error', `No API key: set ${p.apiKeyEnv}`);
+          setPicker(null);
+          return;
+        }
+        // Update engine + config
+        (engine as any).setProvider?.(p.id, apiKey, baseUrl);
+        (config as any).provider = p.id;
+        setCurrentProvider(p.id);
+        // Reset to provider default model if current is from another provider
+        if (!getModels(p.id).find((m) => m.id === currentModel)) {
+          const def = getModels(p.id)[0]?.id || p.defaultModel || '';
+          (engine as any).setModel?.(def);
+          (config as any).model = def;
+          setCurrentModel(def);
+        }
+        pushToast('success', `Provider → ${p.displayName}${apiKey ? '' : ' (custom, no key)'}`);
+        setPicker(null);
+      },
+    });
+  }, [currentProvider, currentModel, config, engine, pushToast]);
+
+  const openModelPicker = useCallback(() => {
+    const providerId = currentProvider as ProviderId;
+    const provider = PROVIDERS[providerId];
+    const models = getModels(providerId);
+    const items: PickerItem[] = models.map((m) => ({
+      id: m.id,
+      label: m.id,
+      detail: m.label,
+      description: m.notes,
+      meta: m.tier,
+      current: m.id === currentModel,
+    }));
+    setPicker({
+      mode: 'model',
+      title: `Switch Model · ${provider?.displayName || providerId}`,
+      items,
+      onSelect: (id: string) => {
+        (engine as any).setModel?.(id);
+        (config as any).model = id;
+        setCurrentModel(id);
+        pushToast('success', `Model → ${id}`);
+        setPicker(null);
+      },
+    });
+  }, [currentProvider, currentModel, engine, pushToast]);
+
+  const openScopePicker = useCallback(() => {
+    const presets = [
+      { id: '__clear__', label: '○ no scope (whole project)', detail: 'clear' },
+      { id: '__pick__', label: '… pick file or directory', detail: 'interactive' },
+    ];
+    const cwd = config.workdir || process.cwd();
+    let items: PickerItem[] = [...presets];
+    // If we have a scope set, include it at the top
+    if (scope && scope !== '__clear__') {
+      items.unshift({
+        id: scope,
+        label: `● current: ${scope}`,
+        detail: 'active',
+        current: true,
+      });
+    }
+    // Allow quick pick of common subdirs
+    try {
+      const fs = require('node:fs') as typeof import('node:fs');
+      const path = require('node:path') as typeof import('node:path');
+      const entries = fs.readdirSync(cwd, { withFileTypes: true })
+        .filter((e: any) => !e.name.startsWith('.') && e.name !== 'node_modules')
+        .slice(0, 12);
+      for (const e of entries) {
+        const id = path.join(cwd, e.name);
+        if (e.isDirectory()) {
+          items.push({ id, label: e.name + '/', detail: 'dir' });
+        } else if (/\.(ts|tsx|js|jsx|py|go|rs|md|json|yaml|yml)$/.test(e.name)) {
+          items.push({ id, label: e.name, detail: 'file' });
+        }
+      }
+    } catch {}
+    setPicker({
+      mode: 'scope',
+      title: 'Set Scope (restrict edits)',
+      items,
+      onSelect: (id: string) => {
+        if (id === '__clear__') {
+          setScope(null);
+          (config as any).scope = null;
+          pushToast('success', 'Scope cleared');
+        } else if (id === '__pick__') {
+          setInput('/scope ');
+          pushToast('info', 'Type a path after /scope');
+        } else {
+          setScope(id);
+          (config as any).scope = id;
+          pushToast('success', `Scope → ${id}`);
+        }
+        setPicker(null);
+      },
+    });
+  }, [config.workdir, scope, pushToast, setInput]);
+
+  const openPermissionPicker = useCallback(() => {
+    const items: PickerItem[] = [
+      { id: 'read-only', label: 'read-only', detail: 'no edits, no bash', current: permissionMode === 'read-only' },
+      { id: 'workspace-write', label: 'workspace-write', detail: 'edit files in cwd', current: permissionMode === 'workspace-write' },
+      { id: 'allow', label: 'allow', detail: 'all operations (autonomous)', current: permissionMode === 'allow' },
+    ];
+    setPicker({
+      mode: 'permission',
+      title: 'Permission Mode',
+      items,
+      onSelect: (id: string) => {
+        tools.setPermissionMode(id as any);
+        setPermissionMode(id as any);
+        (config as any).permissionMode = id;
+        pushToast('success', `Permission → ${id}`);
+        setPicker(null);
+      },
+    });
+  }, [permissionMode, tools, config, pushToast]);
+
+  const closePicker = useCallback(() => setPicker(null), []);
+
+  // ── Command palette: lets the user pick any slash action via Ctrl+K ──
+  const openCommandPalette = useCallback(() => {
+    const items: PickerItem[] = [
+      { id: 'pick:provider', label: '/provider', detail: 'switch LLM provider', meta: 'Ctrl+P' },
+      { id: 'pick:model', label: '/model', detail: 'switch model', meta: 'Ctrl+M' },
+      { id: 'pick:scope', label: '/scope', detail: 'restrict to a path', meta: 'Ctrl+S' },
+      { id: 'pick:permission', label: '/permissions', detail: 'change permission mode', meta: 'Ctrl+Shift+P' },
+      { id: '/autonomous', label: '/autonomous', detail: 'toggle autonomous mode', meta: 'Ctrl+A' },
+      { id: '/clear', label: '/clear', detail: 'clear messages', meta: 'Ctrl+L' },
+      { id: '/status', label: '/status', detail: 'show session status', meta: 'Ctrl+I' },
+      { id: '/cost', label: '/cost', detail: 'token usage and cost' },
+      { id: '/memory', label: '/memory', detail: 'memory statistics' },
+      { id: '/skills', label: '/skills', detail: 'list learned skills' },
+      { id: '/doctor', label: '/doctor', detail: 'run diagnostics' },
+      { id: '/exit', label: '/exit', detail: 'quit', meta: 'Ctrl+D' },
+    ];
+    setPicker({
+      mode: 'engine',
+      title: 'Command Palette',
+      items,
+      onSelect: (id: string) => {
+        setPicker(null);
+        if (id.startsWith('pick:')) {
+          const which = id.slice(5);
+          if (which === 'provider') openProviderPicker();
+          else if (which === 'model') openModelPicker();
+          else if (which === 'scope') openScopePicker();
+          else if (which === 'permission') openPermissionPicker();
+        } else {
+          // Run the slash command
+          handleSlashCommand(id);
+        }
+      },
+    });
+  }, [openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, handleSlashCommand]);
+
+  // ── Session config (reactive to picker changes) ──────────────
   const sessionConfig: SessionConfig = {
     workdir: config.workdir,
-    model: config.model,
-    provider: config.provider,
+    model: currentModel,
+    provider: currentProvider,
   };
 
   return (
-    <NewLayout
-      messages={messages}
-      input={input}
-      setInput={(s: string) => {
-        setInput(s);
-        if (s.startsWith('/')) {
-          setSuggestions(completeSlashCommand(s).slice(0, 5));
-        } else {
-          setSuggestions([]);
+    <>
+      <NewLayout
+        messages={messages}
+        input={input}
+        setInput={(s: string) => {
+          setInput(s);
+          if (s.startsWith('/')) {
+            setSuggestions(completeSlashCommand(s).slice(0, 5));
+          } else {
+            setSuggestions([]);
+          }
+        }}
+        isThinking={isThinking}
+        isStreaming={isStreaming}
+        streamingText={streamingText}
+        config={sessionConfig}
+        permissionMode={permissionMode}
+        autonomous={autonomous}
+        scope={scope}
+        showActivity={showActivity}
+        stats={stats}
+        toasts={toasts}
+        engine="v3"
+        onSubmit={handleSubmit}
+        onExecuteSlash={async (cmd: string, args: string[]) => {
+          const ctx: SlashCommandContext = {
+            messages: messagesRef.current as any,
+            llm: client,
+            memory,
+            tools,
+            sessions,
+            workdir: config.workdir,
+            config,
+            onToggleAutonomous: () => {
+              setAutonomous((a) => !a);
+              return !autonomousRef.current;
+            },
+            onSetScope: (s: string | undefined) => {
+              const next = s ?? null;
+              setScope(next);
+              return next;
+            },
+            onGetScope: () => scope,
+            onGetAutonomous: () => autonomous,
+            onSetPermissionMode: (mode: PermissionMode) => {
+              tools.setPermissionMode(mode);
+              setPermissionMode(mode);
+            },
+            onSwitchModel: (m: string) => {
+              (engine as any).setModel?.(m);
+              (config as any).model = m;
+              setCurrentModel(m);
+              pushToast('success', `Model → ${m}`);
+            },
+            onSwitchProvider: (p: string) => {
+              const prov = PROVIDERS[p as ProviderId];
+              if (!prov) return;
+              const apiKey = process.env[prov.apiKeyEnv] || '';
+              if (!apiKey && prov.id !== 'custom') {
+                pushToast('error', `No API key: set ${prov.apiKeyEnv}`);
+                return;
+              }
+              const baseUrl = process.env.HUAGENT_BASE_URL || config.baseUrl;
+              (engine as any).setProvider?.(prov.id, apiKey, baseUrl);
+              (config as any).provider = prov.id;
+              setCurrentProvider(prov.id);
+              pushToast('success', `Provider → ${prov.displayName}`);
+            },
+            onPersistConfig: () => {
+              try {
+                const path = require('node:path');
+                const fs = require('node:fs');
+                const os = require('node:os');
+                const dir = path.join(os.homedir(), '.huagent');
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(
+                  path.join(dir, 'config.json'),
+                  JSON.stringify(config, null, 2),
+                );
+              } catch {}
+            },
+            onClear: () => setMessages([]),
+          };
+          const result = await executeSlashCommand(cmd, args, ctx);
+          if (result.message) pushToast(result.clearMessages ? 'info' : 'success', result.message);
+          if (result.exit) { onExit?.(); exit(); }
+          return result;
+        }}
+        onToggleActivity={() => setShowActivity((s) => !s)}
+        onExit={() => { onExit?.(); exit(); }}
+        onShowHelp={() => pushToast('info', 'Type /help for all commands')}
+        picker={
+          picker
+            ? {
+                title: picker.title,
+                items: picker.items,
+                onSelect: picker.onSelect,
+                onCancel: closePicker,
+              }
+            : null
         }
-      }}
-      isThinking={isThinking}
-      isStreaming={isStreaming}
-      streamingText={streamingText}
-      config={sessionConfig}
-      permissionMode={permissionMode}
-      autonomous={autonomous}
-      scope={scope}
-      showActivity={showActivity}
-      stats={stats}
-      toasts={toasts}
-      engine="v3"
-      onSubmit={handleSubmit}
-      onExecuteSlash={async (cmd: string, args: string[]) => {
-        const ctx: SlashCommandContext = {
-          messages: messagesRef.current as any,
-          llm: client,
-          memory,
-          tools,
-          sessions,
-          workdir: config.workdir,
-          config,
-          onToggleAutonomous: () => {
-            setAutonomous((a) => !a);
-            return !autonomousRef.current;
-          },
-          onSetScope: (s: string | undefined) => {
-            const next = s ?? null;
-            setScope(next);
-            return next;
-          },
-          onGetScope: () => scope,
-          onGetAutonomous: () => autonomous,
-          onSetPermissionMode: (mode: PermissionMode) => {
-            tools.setPermissionMode(mode);
-            setPermissionMode(mode);
-          },
-          onClear: () => setMessages([]),
-        };
-        const result = await executeSlashCommand(cmd, args, ctx);
-        if (result.message) pushToast(result.clearMessages ? 'info' : 'success', result.message);
-        if (result.exit) { onExit?.(); exit(); }
-        return result;
-      }}
-      onToggleActivity={() => setShowActivity((s) => !s)}
-      onExit={() => { onExit?.(); exit(); }}
-      onShowHelp={() => pushToast('info', 'Type /help for all commands')}
-    />
+        onOpenProviderPicker={openProviderPicker}
+        onOpenModelPicker={openModelPicker}
+        onOpenScopePicker={openScopePicker}
+        onOpenPermissionPicker={openPermissionPicker}
+        onOpenCommandPalette={openCommandPalette}
+      />
+    </>
   );
 };

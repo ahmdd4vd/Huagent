@@ -98,6 +98,23 @@ export class UnifiedClient extends EventEmitter {
   }
 
   /**
+   * Switch to a different provider at runtime. Requires a new API key
+   * (from env) and optionally a custom base URL. The model is reset to
+   * the new provider's default unless `model` is also provided.
+   */
+  setProvider(providerId: ProviderId, apiKey: string, baseUrl?: string, model?: string): void {
+    this.provider = getProvider(providerId);
+    this.apiKey = apiKey;
+    this.baseUrl = baseUrl || this.provider.baseUrl;
+    this.modelOverride = model;
+    // Reset cost stats so a new provider starts at 0
+    this.stats.totalCost = 0;
+    this.stats.cost = 0;
+    this.stats.inputTokens = 0;
+    this.stats.outputTokens = 0;
+  }
+
+  /**
    * List available models for this provider. Returns a defensive copy so
    * callers can't mutate the registry by accident.
    */

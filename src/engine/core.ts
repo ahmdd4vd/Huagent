@@ -118,6 +118,10 @@ export class Engine {
   }
 
   getClient(): UnifiedClient { return this.client; }
+  setModel(model: string): void { this.client.setModel(model); }
+  setProvider(providerId: string, apiKey: string, baseUrl?: string, model?: string): void {
+    this.client.setProvider(providerId as any, apiKey, baseUrl, model);
+  }
   getMessages(): Message[] { return this.messages; }
   getSystemPrompt(): string { return this.systemPrompt; }
   getStats() { return { ...this.stats, ...this.client.getStats() }; }

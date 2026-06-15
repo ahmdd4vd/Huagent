@@ -7,6 +7,7 @@ import { Writable } from 'node:stream';
 import { CompactHeader } from '/root/huagent/dist/tui/compact-header.js';
 import { ModeChips, SubagentPanel, StatusBar, Toasts } from '/root/huagent/dist/tui/status.js';
 import { ActivityFeed } from '/root/huagent/dist/tui/activity-feed.js';
+import { Picker } from '/root/huagent/dist/tui/picker.js';
 import { theme } from '/root/huagent/dist/tui/theme.js';
 
 class StringWritable extends Writable {
@@ -174,6 +175,20 @@ async function main() {
             width: 110,
           })
         ),
+        React.createElement(Box, { marginTop: 1, flexDirection: 'column' },
+          React.createElement(Text, { color: theme.fgSubtle, dimColor: true },
+            '⌨  '),
+          React.createElement(Text, { color: theme.fgSubtle }, 'Ctrl+P'),
+          React.createElement(Text, { color: theme.fgSubtle }, ' provider  ·  '),
+          React.createElement(Text, { color: theme.fgSubtle }, 'Ctrl+M'),
+          React.createElement(Text, { color: theme.fgSubtle }, ' model  ·  '),
+          React.createElement(Text, { color: theme.fgSubtle }, 'Ctrl+S'),
+          React.createElement(Text, { color: theme.fgSubtle }, ' scope  ·  '),
+          React.createElement(Text, { color: theme.fgSubtle }, 'Ctrl+K'),
+          React.createElement(Text, { color: theme.fgSubtle }, ' palette  ·  '),
+          React.createElement(Text, { color: theme.fgSubtle }, 'Ctrl+L'),
+          React.createElement(Text, { color: theme.fgSubtle }, ' activity'),
+        ),
       )
     );
     console.log(out);
@@ -213,6 +228,66 @@ async function main() {
           autonomous: false, scope: 'src/middleware/jwt.ts',
           permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'mock',
         }),
+      )
+    );
+    console.log(out);
+  } else if (view === 'picker-provider') {
+    const items = [
+      { id: 'anthropic', label: 'Anthropic', detail: 'anthropic', description: 'Claude models · API at api.anthropic.com', meta: '✓ key set', current: true },
+      { id: 'openai', label: 'OpenAI', detail: 'openai', description: 'GPT-4o, o1, etc.', meta: '✓ key set' },
+      { id: 'gemini', label: 'Google Gemini', detail: 'gemini', description: '1M context, multimodal', meta: '○ no key' },
+      { id: 'groq', label: 'Groq', detail: 'groq', description: 'Ultra-fast inference', meta: '✓ key set' },
+      { id: 'cerebras', label: 'Cerebras', detail: 'cerebras', description: 'Wafer-scale fast LLM', meta: '○ no key', disabled: true },
+      { id: 'deepseek', label: 'DeepSeek', detail: 'deepseek', description: 'Reasoning + chat models', meta: '✓ key set' },
+      { id: 'custom', label: 'Custom (TokenRouter, etc.)', detail: 'custom', description: 'HUAGENT_BASE_URL', meta: '○ base url', current: false },
+    ];
+    const out = await renderOnce(
+      React.createElement(Box, { flexDirection: 'column', paddingX: 1 },
+        React.createElement(CompactHeader, {
+          autonomous: false, scope: 'src/middleware/jwt.ts',
+          permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'anthropic',
+        }),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(Picker, {
+            title: 'Switch Provider',
+            items,
+            onSelect: () => {},
+            onCancel: () => {},
+            width: 100,
+            maxVisible: 8,
+          })
+        ),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(StatusBar, {
+            stats: { tokens: 4230, cost: 0.0127, requests: 0, steps: 8 },
+            permissionMode: 'workspace-write', engine: 'v3', width: 100,
+          })
+        ),
+      )
+    );
+    console.log(out);
+  } else if (view === 'picker-model') {
+    const items = [
+      { id: 'MiniMax-M3', label: 'MiniMax-M3', detail: 'MiniMax M3', description: 'Latest flagship, balanced', meta: 'Flagship', current: true },
+      { id: 'claude-3-5-sonnet-20241022', label: 'claude-3-5-sonnet-20241022', detail: 'Claude 3.5 Sonnet', description: 'Reliable, fast, good tools', meta: 'Flagship' },
+      { id: 'claude-3-5-haiku-20241022', label: 'claude-3-5-haiku-20241022', detail: 'Claude 3.5 Haiku', description: 'Cheap + fast', meta: 'Fast' },
+      { id: 'claude-3-opus-20240229', label: 'claude-3-opus-20240229', detail: 'Claude 3 Opus', description: 'Deep reasoning, slow', meta: 'Reasoning' },
+    ];
+    const out = await renderOnce(
+      React.createElement(Box, { flexDirection: 'column', paddingX: 1 },
+        React.createElement(CompactHeader, {
+          autonomous: false, scope: 'src/middleware/jwt.ts',
+          permissionMode: 'workspace-write', model: 'MiniMax-M3', provider: 'anthropic',
+        }),
+        React.createElement(Box, { marginTop: 1 },
+          React.createElement(Picker, {
+            title: 'Switch Model · Anthropic',
+            items,
+            onSelect: () => {},
+            onCancel: () => {},
+            width: 100,
+          })
+        ),
       )
     );
     console.log(out);

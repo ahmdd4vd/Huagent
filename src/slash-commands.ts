@@ -217,6 +217,18 @@ function cmdHelp(): SlashCommandResult {
   }
   msg += `\n${fg(theme.fgDim, 'total: ' + SLASH_COMMANDS.length + ' commands')}\n`;
   msg += `\n${mascots.smallHua} ${fg(theme.accent, 'tip: type /command + Tab for completion')}\n`;
+  msg += `\n${gradient('Keyboard Shortcuts', theme.info, theme.lavender)}\n`;
+  msg += `${fg(theme.fgDim, '─'.repeat(60))}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+P'.padEnd(12))} ${fg(theme.fgDim, 'switch provider (interactive picker)')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+M'.padEnd(12))} ${fg(theme.fgDim, 'switch model (interactive picker)')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+S'.padEnd(12))} ${fg(theme.fgDim, 'set scope (restrict edits to a path)')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+K'.padEnd(12))} ${fg(theme.fgDim, 'command palette (all actions)')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+L'.padEnd(12))} ${fg(theme.fgDim, 'toggle activity panel')}\n`;
+  msg += `  ${fg(theme.primary, 'Ctrl+Shift+P'.padEnd(12))} ${fg(theme.fgDim, 'change permission mode')}\n`;
+  msg += `  ${fg(theme.primary, 'Esc'.padEnd(12))} ${fg(theme.fgDim, 'close any open picker')}\n`;
+  msg += `  ${fg(theme.primary, '↑/↓'.padEnd(12))} ${fg(theme.fgDim, 'navigate picker items')}\n`;
+  msg += `  ${fg(theme.primary, 'Enter'.padEnd(12))} ${fg(theme.fgDim, 'select highlighted item')}\n`;
+  msg += `  ${fg(theme.primary, 'Tab'.padEnd(12))} ${fg(theme.fgDim, 'accept top slash suggestion')}\n`;
   return { handled: true, message: msg };
 }
 
