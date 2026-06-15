@@ -23,6 +23,8 @@ import { theme, fg, sparkleText as sparkle, gradient } from './tui/theme.js';
 import { mascots } from './tui/mascot.js';
 import { config as loadDotenv } from 'dotenv';
 import { runWithV4, formatEvent } from './engine/v4-runner.js';
+import { runOnboarding } from './onboarding/wizard.js';
+import { detectProviderFromEnv as _detect } from './providers/registry.js';
 
 loadDotenv();
 
@@ -43,7 +45,7 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 const MEMORY_PATH = join(CONFIG_DIR, 'memory.db');
 
 interface Config {
-  provider: 'anthropic' | 'openai' | 'mock';
+  provider: string;
   model: string;
   apiKey?: string;
   baseUrl?: string;
@@ -61,6 +63,10 @@ interface Config {
   scope?: string | null;
   /** Known provider ids (used by /provider for the list) */
   knownProviders?: string[];
+  /** Effort tier for current session (low/medium/high/xhigh/max/ultramax) */
+  effort?: string;
+  /** Onboarding completed flag — prevents re-running wizard */
+  onboarded?: boolean;
 }
 
 function loadConfig(): Config {
@@ -374,10 +380,41 @@ async function runV4Engine(
 }
 
 async function startAgent(message: string | undefined, options: any, fullArgs: string[] = []): Promise<void> {
+  // Load config (for first-run detection)
+  let config = loadConfig();
+
+  // First-run detection: no provider configured + no API key in env + no --provider/--api-key/--model flags
+  const hasApiKeyInEnv = Object.values(PROVIDERS).some((p) => !!process.env[p.apiKeyEnv]);
+  const isFirstRun =
+    !config.onboarded &&
+    !options.provider &&
+    !options.apiKey &&
+    !options.model &&
+    !hasApiKeyInEnv &&
+    process.stdin.isTTY === true; // Only run wizard interactively
+
+  if (isFirstRun) {
+    try {
+      const result = await runOnboarding(VERSION);
+      config.provider = result.provider;
+      config.model = result.model;
+      config.apiKey = result.apiKey;
+      config.effort = result.effort;
+      config.onboarded = true;
+      saveConfig(config);
+      // Reload to ensure persistence
+      config = loadConfig();
+    } catch (err: any) {
+      if (err.message === 'cancelled') {
+        console.log(`\n${fg(theme.warning, '⚠ Onboarding cancelled. Run huagent again to retry.')}\n`);
+        process.exit(0);
+      }
+      throw err;
+    }
+  }
+
   printBanner();
 
-  // Load config
-  const config = loadConfig();
   if (options.provider) config.provider = options.provider;
   if (options.model) config.model = options.model;
   if (options.apiKey) config.apiKey = options.apiKey;

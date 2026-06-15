@@ -80,11 +80,19 @@ export async function readKeyWithMask(opts: KeyReaderOptions = {}): Promise<stri
   const write = opts.write ?? ((s: string) => process.stdout.write(s));
 
   let buffer = '';
+  let pending = '';
 
   if (prompt) write(prompt);
 
   while (true) {
-    const k = await readChar();
+    // Refill pending if empty
+    if (pending.length === 0) {
+      pending = await readChar();
+    }
+
+    // Take first char from pending
+    const k = pending[0];
+    pending = pending.slice(1);
 
     // Submit on Enter (\r or \n)
     if (k === '\r' || k === '\n') {
@@ -97,25 +105,27 @@ export async function readKeyWithMask(opts: KeyReaderOptions = {}): Promise<stri
       throw new Error('cancelled');
     }
 
-    // Backspace (\x7f is what raw TTY sends, \b is what piped input sends)
+    // Backspace
     if (k === '\x7f' || k === '\b') {
       if (buffer.length > 0) {
         buffer = buffer.slice(0, -1);
-        // Erase the * on screen: backspace, space, backspace
         write('\b \b');
         onEcho('*'.repeat(buffer.length), buffer);
       }
       continue;
     }
 
-    // Escape sequences (arrow keys, etc.) — skip
-    if (k.startsWith('\x1b')) {
-      // Read the rest of the escape sequence and discard
-      // (TTY sends \x1b[A for up, etc.)
+    // Escape sequences (arrow keys, etc.) — skip the whole thing
+    if (k === '\x1b') {
+      // If we have a chunk like \x1b[A, the [ and A are still in pending.
+      // Drop them by clearing the rest of this chunk.
+      // But there could be a real Esc press — in that case pending is empty.
+      // Either way, drop any remaining pending (it belongs to the escape sequence).
+      pending = '';
       continue;
     }
 
-    // Single printable char (length 1, not a control char)
+    // Single printable char
     if (k.length === 1 && k.charCodeAt(0) >= 0x20) {
       buffer += k;
       write('*');
