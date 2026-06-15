@@ -58,3 +58,6 @@ workdir/
 
 # Snapshots
 *.snap.local
+
+# npm auth (contains publish token — never commit)
+.npmrc

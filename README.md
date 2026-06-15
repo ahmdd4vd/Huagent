@@ -2,7 +2,8 @@
 
 > AI coding agent CLI by Huanime. 22 LLM providers, 101 models, MIT-licensed.
 
-[![npm](https://img.shields.io/badge/npm-v4.0.0-CB3837?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/huagent)
+[![npm](https://img.shields.io/npm/v/huagent?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/huagent)
+[![Downloads](https://img.shields.io/npm/dm/huagent?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/huagent)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-FF6B9D?style=flat-square)](LICENSE)
 [![Providers](https://img.shields.io/badge/providers-22-7B61FF?style=flat-square)](#providers)

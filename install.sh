@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # install.sh — One-liner installer for huagent v4.0.0
-# Usage:   curl -fsSL https://raw.githubusercontent.com/d4vdxm/huagent/main/install.sh | sh
+# Usage:   curl -fsSL https://raw.githubusercontent.com/ahmdd4vd/Huagent/main/install.sh | sh
 # Or with flags:
 #   curl -fsSL ... | sh -s -- --version 4.0.0 --prefix ~/.local
 
 set -euo pipefail
 
-REPO="d4vdxm/huagent"
+REPO="ahmdd4vd/Huagent"
 BINARY_NAME="huagent"
 DEFAULT_PREFIX="/usr/local"
 FALLBACK_PREFIX="$HOME/.local"
@@ -17,6 +17,7 @@ PREFIX=""
 NO_SYMLINK=0
 NO_PATH_UPDATE=0
 SKIP_DEPS=0
+FROM_NPM=0
 DRY_RUN=0
 
 usage() {
@@ -33,6 +34,7 @@ Options:
   --no-symlink          don't create a symlink in PREFIX/bin
   --no-path-update      don't modify PATH/shell rc
   --skip-deps           skip npm install (assumes deps already installed)
+  --from-npm            install via 'npm install -g huagent' instead of cloning the repo
   --dry-run             print commands without executing
   -h, --help            show this help
 
@@ -56,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --no-symlink) NO_SYMLINK=1; shift ;;
     --no-path-update) NO_PATH_UPDATE=1; shift ;;
     --skip-deps) SKIP_DEPS=1; shift ;;
+    --from-npm) FROM_NPM=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
@@ -115,6 +118,35 @@ if [[ -z "$PREFIX" ]]; then
 fi
 INSTALL_DIR="$PREFIX/share/huagent"
 BIN_LINK="$PREFIX/bin/$BINARY_NAME"
+
+# ─── NPM install path ───────────────────────────────────────────────
+if [[ $FROM_NPM -eq 1 ]]; then
+  echo ""
+  echo "▸ Installing from npm registry..."
+  # Allow custom npm prefix via NPM_CONFIG_PREFIX
+  if [[ "$PREFIX" != "$DEFAULT_PREFIX" ]]; then
+    NPM_CONFIG_PREFIX="$PREFIX" run npm install -g huagent --no-audit --no-fund
+  else
+    run npm install -g huagent --no-audit --no-fund
+  fi
+  echo ""
+  echo "╭──────────────────────────────────────────────────────────────╮"
+  echo "│  huagent installed successfully (via npm)!                  │"
+  echo "╰──────────────────────────────────────────────────────────────╯"
+  echo ""
+  echo "  Verify:"
+  echo "    which $BINARY_NAME"
+  echo "    $BINARY_NAME --version"
+  echo ""
+  echo "  Configure provider:"
+  echo "    export ANTHROPIC_API_KEY=***       # or any provider's key"
+  echo "    $BINARY_NAME"
+  echo ""
+  echo "  Update later:  npm update -g huagent"
+  echo "  Uninstall:     npm uninstall -g huagent"
+  echo ""
+  exit 0
+fi
 
 # ─── Download ───────────────────────────────────────────────────────
 TMP_DIR=$(mktemp -d -t huagent-install-XXXXXX)
