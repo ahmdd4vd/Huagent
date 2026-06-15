@@ -1,7 +1,7 @@
 /**
  * v4/stream/cognitive-event.ts
  *
- * The wire type of HuaEngine v4.0. Every component reads and writes
+ * The wire type of Huagent v4.0. Every component reads and writes
  * CognitiveEvent. Bi-temporal, discriminated union, JSON-serializable.
  *
  * Why a union type, not a class hierarchy:

@@ -268,7 +268,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
         {isThinking || isStreaming ? (
           <Box>
             <Text color={theme.primary}><Spinner type="dots" /></Text>
-            <Text color={theme.fgMuted}>  {autonomous ? 'hua-chan is crafting autonomously' : 'hua-chan is thinking'}…</Text>
+            <Text color={theme.fgMuted}>  {autonomous ? 'Huagent is running autonomously' : 'Huagent is thinking'}…</Text>
           </Box>
         ) : (
           <Box>

@@ -148,7 +148,7 @@ export async function executeSlashCommand(
       return await cmdDiff(ctx);
     case 'version':
     case 'v':
-      return cmdVersion();
+      return cmdVersion([], ctx);
     case 'sessions':
     case 'session':
       return cmdSessions(args, ctx);
@@ -167,7 +167,7 @@ export async function executeSlashCommand(
     case 'exit':
     case 'quit':
     case 'q':
-      return { handled: true, exit: true, message: `${mascots.winkHua} Sayonara senpai~` };
+      return { handled: true, exit: true, message: `${mascots.winkHua} Goodbye!` };
     default:
       return {
         handled: false,
@@ -754,8 +754,9 @@ async function cmdDiff(ctx: SlashCommandContext): Promise<SlashCommandResult> {
   }
 }
 
-function cmdVersion(): SlashCommandResult {
-  return { handled: true, message: `${mascots.smallHua} ${fg(theme.primary, 'huagent v0.2.0')} ${fg(theme.fgDim, 'by huanime')}` };
+function cmdVersion(_args: string[], ctx: SlashCommandContext): SlashCommandResult {
+  const v = (ctx.config && ctx.config.version) || '4.0.0';
+  return { handled: true, message: `${mascots.smallHua} ${fg(theme.primary, 'huagent v' + v)}` };
 }
 
 function cmdSessions(args: string[], ctx: SlashCommandContext): SlashCommandResult {

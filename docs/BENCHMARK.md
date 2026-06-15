@@ -1,4 +1,4 @@
-# HuaEngine v4.0 — Benchmarks
+# Huagent v4.0 — Benchmarks
 
 > Comparing v3.0 (ReAct loop) vs v4.0 (Stream-native actor model) vs Claude Code
 
@@ -114,7 +114,7 @@ All 51 tests pass in <120 seconds (scripts/v4-exploration/test-v4-e2e-final.ts):
 > benchmark it. Numbers below are estimates based on Claude Code's documented
 > architecture and user reports. Take with a grain of salt.
 
-| Metric | Claude Code | HuaEngine v4.0 | Notes |
+| Metric | Claude Code | Huagent v4.0 | Notes |
 |---|---|---|---|
 | Architecture | ReAct loop + subagents | Stream-native actor model | Different paradigm |
 | Planning | Flat list of steps | HTN with parallel subgoals | v4.0 parallelizes |
@@ -136,7 +136,7 @@ All 51 tests pass in <120 seconds (scripts/v4-exploration/test-v4-e2e-final.ts):
 - MCP for tools
 - Linear conversation
 
-**HuaEngine v4.0:**
+**Huagent v4.0:**
 - Stream-native actor model
 - 3-critic mesh with arbiter
 - Composable capabilities

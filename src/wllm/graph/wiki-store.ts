@@ -2,7 +2,7 @@
  * wllm/graph/wiki-store.ts
  *
  * WikiStore — the central storage layer for WllmConcept.
- * Wraps HuaEngine v4.0 GraphStore (bi-temporal property graph) and adds:
+ * Wraps Huagent v4.0 GraphStore (bi-temporal property graph) and adds:
  *   - 5-memory routing (semantic, episodic, structural, causal, meta)
  *   - WikiPage CRUD with all 5-memory-specific fields
  *   - Bi-temporal versioning (inherited from graph)

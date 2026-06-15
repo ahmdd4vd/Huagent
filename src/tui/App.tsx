@@ -419,8 +419,8 @@ const Header: React.FC<{ mood: string; stats: any; permissionMode: string; showS
         <Gradient name="pastel">
           <Text bold>huagent</Text>
         </Gradient>
-        <Text color={theme.fgDim}>the cutest, smartest coding agent in your terminal</Text>
-        <Text color={theme.accent}>by huanime ✦ powered by magic ✦</Text>
+        <Text color={theme.fgDim}>AI coding agent CLI</Text>
+        <Text color={theme.accent}>by huanime · 22 LLM providers</Text>
         <Text color={theme.fgMuted}>model: {config.model} | perm: <Text color={modeColor}>{permissionMode}</Text></Text>
       </Box>
       <Box flexDirection="column" alignItems="flex-end">

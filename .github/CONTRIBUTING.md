@@ -1,6 +1,6 @@
 # Contributing to huagent
 
-> ✦ Made with ♡ by huanime ✧  Contributions welcome!
+> Contributions welcome.
 
 ## Ground rules
 
@@ -91,4 +91,4 @@ This is a small project built with love. Help us keep it that way. ✧
 
 ---
 
-✧･ﾟ: *✧･ﾟ:*  Made with ♡ by huanime  *:･ﾟ✧*:･ﾟ✧
+— © 2026 huanime

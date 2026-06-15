@@ -1,99 +1,73 @@
-// ASCII art mascots - cute anime characters for the agent
-// "Hua" - the magical coding girl
+// Mascot glyphs — subtle, modern, non-lebay.
+// "Hua" is the agent's spirit; here she's represented as minimal ASCII + a few
+// status glyphs. No kaomoji, no emoji, no "senpai".
 
 export const mascots = {
+  // Wordmark — used by /help and the banner
   hua: `
-         ✦
-        /\\     ♡
-       /  \\   /
-      / ✦  \\ / ✧
-     /______\\
-    /  ◕   ◕  \\      Hua
-   /     ▽      \\   "Code is
-  /_____________\\    my magic!"
-       |  |
-      /|  |\\
-     (_|  |_)`,
+       .
+      /|\\
+     / | \\
+    /  |  \\
+   /___|___\\
+      [_]
+      Hua`,
 
-  huaHappy: `
-    \\(^o^)/
-     |∇|
-   ✧ Code ✧
-    Princess`,
+  // Mood glyphs — single chars, no faces
+  huaHappy:    '◆',
+  huaThinking: '◇',
+  huaCoding:   '▣',
+  huaCasting:  '◇',
+  huaSuccess:  '✓',
+  huaError:    '✗',
 
-  huaThinking: `
-     (°▽°;)
-     |  ?
-   ...thinking...`,
+  // Single-line mascots (for status bar / toasts)
+  smallHua:    '◆',
+  winkHua:     '◆',
+  sleepHua:    '◇',
+  excitedHua:  '◆',
 
-  huaCoding: `
-     (>ω<)つ
-     |⌨|≡
-   ✦ coding ✦
-   !  FAST  !`,
-
-  huaCasting: `
-    ✧･ﾟ:*✧
-    (✧◡✧)ノ
-    ╰(☆‿☆)╯
-   ~ Magic ~`,
-
-  huaSuccess: `
-    \\(★ω★)/
-     ╰|─|╯
-   ✦ SUCCESS! ✦`,
-
-  huaError: `
-    (；ω；)
-     |╯╰|
-    error...`,
-
-  smallHua: '(◕‿◕)✧',
-  winkHua: '(◕‵‿‵◕)♡',
-  sleepHua: '(－ω－) zzZ',
-  excitedHua: '☆*:.｡.o(≧▽≦)o.｡.:*☆',
-
-  // Cute borders
+  // Borders
   border1: '╭─────────────────────────────────────────────╮',
-  border2: '│  ✦ hua-chan is online ✦                    │',
+  border2: '│  huagent by huanime                          │',
   border3: '╰─────────────────────────────────────────────╯',
 
-  // Loading animations frames
-  loadFrames: ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
-  sakuraFrames: ['🌸', '✨', '💖', '✿', '❀'],
-  magicFrames: ['✦', '✧', '⋆', '✩', '✪'],
+  // Spinner frames (braille, no emoji)
+  loadFrames:   ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+  sakuraFrames: ['◆', '◇', '◈', '◉', '○'],
+  magicFrames:  ['◆', '◇', '◈', '◉', '○'],
 };
 
-// Status emojis with anime flair
+// Status glyphs — minimal, semantic
 export const statusEmojis = {
-  ready: '⚡',
-  thinking: '🧠',
-  coding: '⌨️',
-  searching: '🔍',
-  success: '✨',
-  error: '💥',
-  warning: '⚠️',
-  info: '💡',
-  magic: '✨',
-  save: '💾',
-  load: '📂',
-  quest: '📜',
-  level: '🌟',
+  ready:     '◆',
+  thinking:  '◇',
+  coding:    '▣',
+  searching: '○',
+  success:   '✓',
+  error:     '✗',
+  warning:   '!',
+  info:      'i',
+  magic:     '◆',
+  save:      'S',
+  load:      'L',
+  quest:     'Q',
+  level:     '★',
 };
 
-// Cute tool icons
+// Tool icons — minimal ASCII/unicode (no emoji)
 export const toolIcons: Record<string, string> = {
-  read: '📖',
-  write: '✏️',
-  edit: '✂️',
-  bash: '🖥️',
-  search: '🔍',
-  grep: '🔎',
-  web: '🌐',
-  fetch: '📡',
-  memory: '🧠',
-  plan: '📋',
-  default: '⚙️',
+  read:    'R',
+  write:   'W',
+  edit:    'E',
+  bash:    '$',
+  search:  '/',
+  grep:    'G',
+  web:     '@',
+  fetch:   'F',
+  memory:  'M',
+  plan:    'P',
+  default: '*',
 };
 
 export const getToolIcon = (name: string): string => {

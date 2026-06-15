@@ -207,4 +207,4 @@ Total: **870+ tests, 0 failures**.
 
 ---
 
-✧･ﾟ: *✧･ﾟ:*  Made with ♡ by huanime  *:･ﾟ✧*:･ﾟ✧
+— © 2026 huanime

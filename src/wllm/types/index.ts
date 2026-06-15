@@ -1,7 +1,7 @@
 /**
  * wllm/types/index.ts
  *
- * WllmConcept type system — extends HuaEngine v4.0 graph types with
+ * WllmConcept type system — extends Huagent v4.0 graph types with
  * 5-memory system, confidence levels, freshness tracking, and
  * Obsidian-compatible wiki page semantics.
  *

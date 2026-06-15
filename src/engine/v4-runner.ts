@@ -1,7 +1,7 @@
 /**
  * src/engine/v4-runner.ts
  *
- * CLI integration of HuaEngine v4.0. Wraps the v4 engine with adapters
+ * CLI integration of Huagent v4.0. Wraps the v4 engine with adapters
  * for the v3.0 client/memory/tools, so users can run v4 without
  * changing their existing config.
  *

@@ -1,4 +1,4 @@
-# HuaEngine v4.0 — Migration Guide
+# Huagent v4.0 — Migration Guide
 
 > How to migrate from v3.0 (ReAct loop) to v4.0 (Stream-native actor model)
 

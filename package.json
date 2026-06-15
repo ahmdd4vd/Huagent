@@ -1,7 +1,7 @@
 {
   "name": "huagent",
   "version": "4.0.0",
-  "description": "Anime-powered AI coding agent CLI - the cutest, smartest coding companion in your terminal",
+  "description": "AI coding agent CLI — 22 LLM providers, 101 models, MIT-licensed",
   "type": "module",
   "bin": {
     "huagent": "./bin/huagent.js"

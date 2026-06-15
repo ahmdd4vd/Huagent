@@ -1,6 +1,6 @@
 /**
  * v4/index.ts
- * Public API for HuaEngine v4.0.
+ * Public API for Huagent v4.0.
  */
 export * from "./stream/index.js";
 export * from "./htn/index.js";

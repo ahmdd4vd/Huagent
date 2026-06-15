@@ -205,11 +205,11 @@ export class LLMClient extends EventEmitter {
     // Determine response
     let responseText = '';
     if (userText.includes('hello') || userText.includes('hi') || userText.includes('halo')) {
-      responseText = `✧･ﾟ: *✧･ﾟ:* Hello senpai! *:･ﾟ✧*:･ﾟ✧\n\nI'm Hua, your magical coding companion! I can help you:\n\n  ✦ Read and edit files\n  ✦ Run bash commands\n  ✦ Search code\n  ✦ Plan complex tasks\n  ✦ Remember context across sessions\n\nWhat shall we build together today? (◕‿◕)✧`;
+      responseText = `Hello! I'm Huagent, an AI coding agent. I can help you:\n\n  • Read and edit files\n  • Run bash commands\n  • Search code\n  • Plan complex tasks\n  • Remember context across sessions\n\nWhat are we building?`;
     } else if (userText.includes('plan') || userText.includes('think')) {
-      responseText = `🧠 **My plan:**\n\n1. **Understand** the request\n2. **Decompose** into steps\n3. **Execute** each step with verification\n4. **Critique** the result\n5. **Refine** if needed\n\nLet me start working on it! (◕‵‿‵◕)♡`;
+      responseText = `**My plan:**\n\n1. **Understand** the request\n2. **Decompose** into steps\n3. **Execute** each step with verification\n4. **Critique** the result\n5. **Refine** if needed\n\nLet me start working on it.`;
     } else {
-      responseText = `✧ I understand! Let me work on that...\n\n*thinking magi-girl thoughts* ✧\n\nBased on your request, I'll:\n  1. Analyze what you need\n  2. Take the right approach\n  3. Verify the result\n\nReady to proceed? ☆*:.｡.o(≧▽≦)o.｡.:*☆`;
+      responseText = `I understand. Let me work on that.\n\nBased on your request, I'll:\n  1. Analyze what you need\n  2. Take the right approach\n  3. Verify the result\n\nReady to proceed.`;
     }
 
     // Simulate latency

@@ -44,4 +44,4 @@ This Code of Conduct is adapted from the [Contributor Covenant](https://www.cont
 
 ---
 
-✧･ﾟ: *✧･ﾟ:*  Made with ♡ by huanime  *:･ﾟ✧*:･ﾟ✧
+— © 2026 huanime

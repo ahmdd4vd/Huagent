@@ -1,11 +1,13 @@
 # Changelog
 
-All notable changes to huagent are documented in this file.
+All notable changes to Huagent are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.0.0] - 2026-06-15 — "HuaEngine"
+## [4.0.0] - 2026-06-15 — Huagent v4.0
+
+> Rebrand: **Huagent by Huanime**. AI coding agent CLI. Tightened visuals — no lebay emoji, modern palette, professional tone throughout.
 
 ### ✨ Added
 - **22 LLM providers** (up from 14): groq, cerebras, deepseek, openrouter, together, fireworks, perplexity, huggingface
@@ -42,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Models: 101 (was 1 default per provider)
 - Slash commands: 26 (was 24)
 - Lines of code: 18k+
+
+### 🎨 Rebrand
+- Project renamed: `huagent` → `Huagent` (display) by **Huanime**
+- Mascot glyphs simplified: no kaomoji, no lebay emoji, single-char status indicators
+- TUI palette kept (sakura/lavender/gold) but stripped of "senpai", "Hua-chan", "magic", "Fable 5" references
+- CLI banner: clean two-liner (`huagent v4.0.0` / `AI coding agent CLI`)
 
 ---
 

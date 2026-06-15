@@ -73,8 +73,8 @@ run() {
 
 # ─── Sanity checks ──────────────────────────────────────────────────
 echo ""
-echo "  ✦ huagent installer v4.0.0 ✦"
-echo "  the cutest, smartest coding agent"
+echo "  huagent installer v4.0.0"
+echo "  AI coding agent CLI"
 echo ""
 
 if ! command -v node >/dev/null 2>&1; then
@@ -178,7 +178,7 @@ fi
 # ─── Done ───────────────────────────────────────────────────────────
 echo ""
 echo "╭──────────────────────────────────────────────────────────────╮"
-echo "│  ✦ huagent installed successfully! ✦                         │"
+echo "│  huagent installed successfully!                              │"
 echo "╰──────────────────────────────────────────────────────────────╯"
 echo ""
 echo "  Run:"
@@ -191,6 +191,4 @@ echo ""
 echo "  List providers:   $BINARY_NAME → /providers"
 echo "  List models:      $BINARY_NAME → /models"
 echo "  Diagnostics:      $BINARY_NAME → /doctor"
-echo ""
-echo "  ✧･ﾟ: *✧･ﾟ:*  Made with ♡ by huanime  *:･ﾟ✧*:･ﾟ✧"
 echo ""

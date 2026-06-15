@@ -1,9 +1,9 @@
-# HuaEngine v4.0 — User Guide
+# Huagent v4.0 — User Guide
 
-> The cutest, smartest, **fastest** coding agent in your terminal — powered by
+> AI coding agent CLI by Huanime. Stream-native engine, modern TUI, 22 LLM providers.
 > 7 novel architectural primitives that Claude Code doesn't have.
 
-## What is HuaEngine v4.0?
+## What is Huagent v4.0?
 
 Huagent v4.0 is a **fundamental architectural rewrite** of the huagent engine.
 v3.0 was a ReAct loop with helpful features. v4.0 is a **stream-native actor

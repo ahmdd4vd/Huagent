@@ -79,8 +79,8 @@ function printBanner(): void {
   const banner = `
 ${gradient('╔════════════════════════════════════════════════════════╗', theme.primary, theme.secondary)}
 ${gradient('║', theme.primary, theme.secondary)}  ${sparkle('huagent v' + VERSION)}  ${gradient('║', theme.primary, theme.secondary)}
-${gradient('║', theme.primary, theme.secondary)}  ${fg(theme.sakura, 'the cutest, smartest coding agent')}  ${gradient('║', theme.primary, theme.secondary)}
-${gradient('║', theme.primary, theme.secondary)}  ${fg(theme.accent, 'by huanime ✦ inspired by claw-code ✦')}  ${gradient('║', theme.primary, theme.secondary)}
+${gradient('║', theme.primary, theme.secondary)}  ${fg(theme.sakura, 'AI coding agent CLI')}  ${gradient('║', theme.primary, theme.secondary)}
+${gradient('║', theme.primary, theme.secondary)}  ${fg(theme.accent, '22 providers · 101 models · MIT')}  ${gradient('║', theme.primary, theme.secondary)}
 ${gradient('╚════════════════════════════════════════════════════════╝', theme.primary, theme.secondary)}
 
 ${mascots.smallHua} ${fg(theme.sky, 'Type a request or /help for commands. Ctrl+C to exit.')}
@@ -176,7 +176,7 @@ function parseOptions(argList: string[]): any {
 function cmdHelp(): void {
   console.log(`
 ${gradient('huagent', theme.primary, theme.secondary)} v${VERSION}
-${fg(theme.fgDim, 'the cutest, smartest coding agent in your terminal')}
+${fg(theme.fgDim, 'AI coding agent CLI')}
 
 ${fg(theme.primary, 'USAGE:')}
   huagent                    ${fg(theme.fgDim, 'Start interactive TUI')}
@@ -236,7 +236,7 @@ ${fg(theme.primary, 'KEYBOARD:')}
   Ctrl+L     ${fg(theme.fgDim, 'Toggle status panel')}
   Tab        ${fg(theme.fgDim, 'Complete slash command')}
 
-${mascots.smallHua} ${fg(theme.accent, 'by huanime ✦ powered by magic ✦ discipline from Fable 5 ✦')}
+${mascots.smallHua} ${fg(theme.accent, 'by huanime · powered by 22 LLM providers')}
 `);
 }
 
@@ -495,7 +495,7 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
       rl.question(fg(theme.primary, '\n❯ '), async (input) => {
         const cmd = input.trim();
         if (cmd === '/exit' || cmd === '/quit') {
-          console.log(`${mascots.winkHua} ${fg(theme.sakura, 'Sayonara senpai~')}`);
+          console.log(`${mascots.winkHua} ${fg(theme.sakura, 'Goodbye!')}`);
           store.close();
           rl.close();
           return;

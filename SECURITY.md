@@ -77,4 +77,4 @@ We pin all dependencies in `package-lock.json` and run `npm audit` in CI. See [S
 
 ---
 
-✧･ﾟ: *✧･ﾟ:*  Made with ♡ by huanime  *:･ﾟ✧*:･ﾟ✧
+— © 2026 huanime
