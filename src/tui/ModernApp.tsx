@@ -107,7 +107,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [autonomous, setAutonomous] = useState<boolean>(Boolean(config.autonomous));
   const [scope, setScope] = useState<string | null>(config.scope ?? null);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<Array<{ name: string; summary: string; aliases: string[] }>>([]);
 
   // ── Picker state (Ctrl+P/Ctrl+T/... open this) ───────────────
   type PickerMode = 'provider' | 'model' | 'scope' | 'permission' | 'engine' | null;
@@ -178,7 +178,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   // ── Tab completion ───────────────────────────────────────────
   const handleTabCompletion = useCallback(() => {
     if (input.startsWith('/') && suggestions.length > 0) {
-      setInput(suggestions[0] + ' ');
+      setInput(suggestions[0].name + ' ');
       setSuggestions([]);
     }
   }, [input, suggestions]);

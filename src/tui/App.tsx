@@ -39,7 +39,7 @@ export const App: React.FC<AppProps> = ({ engine, client, memory, tools, session
   const [activeToolCall, setActiveToolCall] = useState<{ name: string; args: any } | null>(null);
   const [stats, setStats] = useState({ tokens: 0, cost: 0, steps: 0, refinements: 0, requests: 0, tasks: 0 });
   const [mood, setMood] = useState<'happy' | 'thinking' | 'coding' | 'casting'>('happy');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<Array<{ name: string; summary: string; aliases: string[] }>>([]);
   const [showToolResult, setShowToolResult] = useState<{ name: string; result: any; duration: number } | null>(null);
   const [permissionMode, setPermissionMode] = useState(tools.getPermissionMode());
   const [showStatus, setShowStatus] = useState(false);
@@ -118,7 +118,7 @@ export const App: React.FC<AppProps> = ({ engine, client, memory, tools, session
 
   const handleTabCompletion = () => {
     if (input.startsWith('/') && suggestions.length > 0) {
-      setInput(suggestions[0] + ' ');
+      setInput(suggestions[0].name + ' ');
       setSuggestions([]);
     }
   };
@@ -360,15 +360,21 @@ export const App: React.FC<AppProps> = ({ engine, client, memory, tools, session
         )}
       </Box>
 
-      {/* Suggestions */}
+      {/* Suggestions — OpenCode-style: name + summary */}
       {suggestions.length > 0 && (
-        <Box marginTop={1} paddingX={1} borderStyle="single" borderColor={theme.lavender}>
-          <Text color={theme.lavender}>Suggestions: </Text>
+        <Box marginTop={1} paddingX={1} borderStyle="single" borderColor={theme.lavender} flexDirection="column">
           {suggestions.map((s, i) => (
-            <Text key={s} color={i === 0 ? theme.accent : theme.fgDim}>
-              {i > 0 ? '  ' : ''}{s}
-            </Text>
+            <Box key={s.name}>
+              <Text color={theme.lavender}>{i === 0 ? '▶ ' : '  '}</Text>
+              <Text color={i === 0 ? theme.accent : theme.fg} bold={i === 0}>
+                {s.name.padEnd(16)}
+              </Text>
+              <Text color={i === 0 ? theme.fgMuted : theme.fgSubtle}>{s.summary}</Text>
+            </Box>
           ))}
+          <Box marginTop={0}>
+            <Text color={theme.fgSubtle}>  ↪ Tab complete · Enter runs top match</Text>
+          </Box>
         </Box>
       )}
 

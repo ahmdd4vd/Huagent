@@ -913,10 +913,18 @@ function cmdTheme(args: string[]): SlashCommandResult {
 }
 
 // Tab completion for slash commands
-export function completeSlashCommand(partial: string): string[] {
+export function completeSlashCommand(partial: string): Array<{ name: string; summary: string; aliases: string[] }> {
   if (!partial.startsWith('/')) return [];
-  const cmd = partial.slice(1).toLowerCase();
+  const cmd = partial.slice(1).toLowerCase().trim();
+  if (!cmd) return [];
   return SLASH_COMMANDS
     .filter((c) => c.name.startsWith(cmd) || c.aliases.some((a) => a.startsWith(cmd)))
-    .map((c) => '/' + c.name);
+    .map((c) => ({ name: '/' + c.name, summary: c.summary, aliases: c.aliases }));
+}
+
+/** Get the meta for a single command (by name, no leading /). */
+export function getCommandMeta(name: string): { name: string; summary: string; aliases: string[] } | null {
+  const cmd = SLASH_COMMANDS.find((c) => c.name === name || c.aliases.includes(name));
+  if (!cmd) return null;
+  return { name: '/' + cmd.name, summary: cmd.summary, aliases: cmd.aliases };
 }

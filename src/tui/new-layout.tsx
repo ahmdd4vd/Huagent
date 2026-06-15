@@ -31,6 +31,7 @@ import { QuestionPrompt } from './question-prompt.js';
 import { PlanMode } from './plan-mode.js';
 import { ToolConfirmation } from './tool-confirmation.js';
 import { SessionResume } from './session-resume.js';
+import { completeSlashCommand } from '../slash-commands.js';
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -101,11 +102,17 @@ export interface NewLayoutProps {
   dialog: DialogState;
 }
 
-const SLASH_COMMANDS = [
-  '/help', '/status', '/model', '/provider', '/autonomous', '/scope', '/permissions',
-  '/memory', '/skills', '/sessions', '/resume', '/marketplace', '/agents', '/modes',
-  '/activity', '/theme', '/diff', '/init', '/export', '/undo', '/doctor', '/clear',
-  '/compact', '/cost', '/exit', '/shop', '/act', '/subs',
+// ─── Slash command suggestions (autocomplete, OpenCode-style) ──
+// The completion logic lives in src/slash-commands.ts. We only import the
+// helper here so the suggestions pop up as the user types.
+
+// All known slash command names (for autocomplete-on-Enter detection).
+// Kept in sync with SLASH_COMMANDS in src/slash-commands.ts.
+const SLASH_COMMANDS_LIST = [
+  'help', 'status', 'cost', 'clear', 'compact', 'model', 'models', 'provider',
+  'providers', 'autonomous', 'scope', 'permissions', 'memory', 'skills', 'init',
+  'diff', 'version', 'marketplace', 'agents', 'modes', 'activity', 'sessions',
+  'resume', 'export', 'undo', 'doctor', 'theme', 'exit',
 ];
 
 // ─── Component ─────────────────────────────────────────────────
@@ -143,7 +150,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
   const [frame, setFrame] = useState(0);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [subagents, setSubagents] = useState<SubagentState[]>([]);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<Array<{ name: string; summary: string; aliases: string[] }>>([]);
   const [width, setWidth] = useState(process.stdout.columns || 100);
 
   // Spinner animation
@@ -246,6 +253,23 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
     if (key.return) {
       const text = input.trim();
       if (!text) return;
+      // ── Autocomplete + execute on Enter (OpenCode-style):
+      // ── if input is a partial slash command, expand to top match
+      // ── and immediately execute it.
+      if (text.startsWith('/') && suggestions.length > 0) {
+        const cmdOnly = text.slice(1).split(/\s+/)[0];
+        const isFullCommand = SLASH_COMMANDS_LIST.includes(cmdOnly);
+        if (!isFullCommand) {
+          // Use top suggestion as the actual command to run
+          const top = suggestions[0];
+          const topCmdName = top.name.slice(1); // strip leading "/"
+          const args = text.slice(1 + cmdOnly.length).trim().split(/\s+/).filter(Boolean);
+          setInput('');
+          setSuggestions([]);
+          await onExecuteSlash(topCmdName, args);
+          return;
+        }
+      }
       setInput('');
       setSuggestions([]);
       if (text.startsWith('/')) {
@@ -260,7 +284,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
     }
     if (key.tab) {
       if (suggestions.length > 0) {
-        setInput(suggestions[0] + ' ');
+        setInput(suggestions[0].name + ' ');
         setSuggestions([]);
       }
       return;
@@ -273,7 +297,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
       const next = input + inputChar;
       setInput(next);
       if (next.startsWith('/')) {
-        setSuggestions(SLASH_COMMANDS.filter((c) => c.startsWith(next)).slice(0, 5));
+        setSuggestions(completeSlashCommand(next).slice(0, 5));
       } else {
         setSuggestions([]);
       }
@@ -403,15 +427,24 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
         </Box>
       ) : (
         <>
-          {/* Tab completion suggestions */}
+          {/* Tab completion suggestions — OpenCode-style: name + summary */}
           {suggestions.length > 0 && (
-            <Box paddingX={1}>
-              <Text color={theme.lavender}>↪ </Text>
+            <Box paddingX={1} flexDirection="column">
               {suggestions.map((s, i) => (
-                <Text key={s} color={i === 0 ? theme.accent : theme.fgMuted}>
-                  {i > 0 ? '  ' : ''}{s}
-                </Text>
+                <Box key={s.name}>
+                  <Text color={theme.lavender}>{i === 0 ? '▶ ' : '  '}</Text>
+                  <Text color={i === 0 ? theme.accent : theme.fg} bold={i === 0}>
+                    {s.name.padEnd(16)}
+                  </Text>
+                  <Text color={i === 0 ? theme.fgMuted : theme.fgSubtle}>{s.summary}</Text>
+                  {s.aliases.length > 0 && i === 0 && (
+                    <Text color={theme.fgSubtle}>  ({s.aliases.join(', ')})</Text>
+                  )}
+                </Box>
               ))}
+              <Box marginTop={0}>
+                <Text color={theme.fgSubtle}>  ↪ Tab complete · Enter runs top match</Text>
+              </Box>
             </Box>
           )}
 
