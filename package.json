@@ -1,6 +1,6 @@
 {
   "name": "huagent",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "AI coding agent CLI — 22 LLM providers, 101 models, MIT-licensed",
   "type": "module",
   "bin": {
