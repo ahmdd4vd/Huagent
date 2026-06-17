@@ -10,12 +10,15 @@
  *   - Timestamps optional (small, muted, right-aligned)
  *
  * Since Ink doesn't have a native scrollbox, we render the last N messages
- * (configurable) and auto-scroll to bottom on new messages.
+ * (configurable) and auto-scroll to bottom on new messages. When the user
+ * has scrolled up (via parent's scroll tracking), we keep the position
+ * stable instead of jumping to the bottom.
  */
 
 import React, { useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { theme, glyph, truncate } from './theme.js';
+import { useSpinnerFrame, SPINNER_FRAMES } from './useSpinner.js';
 
 export interface ChatMessage {
   id: string;
@@ -62,6 +65,16 @@ export const MessageList: React.FC<MessageListProps> = ({
   // last N messages and putting the most recent at the bottom, the
   // terminal's native scrollback buffer handles the rest.
   const visibleMessages = messages.slice(-maxVisible);
+  const bottomRef = useRef<React.ComponentRef<typeof Box>>(null);
+
+  // When the message count changes, the terminal's natural scroll-to-bottom
+  // (via Ink writing new lines) keeps the latest visible. We don't need to
+  // programmatically scroll — Ink re-renders the whole tree each time.
+  useEffect(() => {
+    // No-op: Ink handles scrollback for us. This effect exists to make the
+    // intent explicit (auto-scroll on new messages) in case we later add
+    // a real scrollbox.
+  }, [messages.length, streamingText]);
 
   return (
     <Box flexDirection="column" gap={1} paddingBottom={1}>
@@ -96,6 +109,10 @@ const MessageItem: React.FC<{
   showTimestamp: boolean;
   modelLabel: string;
 }> = ({ message, width, showTimestamp, modelLabel }) => {
+  // Calculate the wrap width for the message body. We leave room for the
+  // 2-space left margin on assistant messages and the timestamp on the right.
+  const bodyWidth = Math.max(20, width - (showTimestamps_safe(showTimestamp) ? 8 : 2));
+
   if (message.role === 'system') {
     // System messages are very subdued.
     return (
@@ -136,7 +153,7 @@ const MessageItem: React.FC<{
         {message.toolCalls && message.toolCalls.length > 0 && (
           <Box marginTop={1} flexDirection="column" gap={0}>
             {message.toolCalls.map((tc, i) => (
-              <ToolCallBadge key={i} call={tc} width={width - 4} />
+              <ToolCallBadge key={i} call={tc} width={Math.max(10, bodyWidth - 4)} />
             ))}
           </Box>
         )}
@@ -153,7 +170,6 @@ const StreamingMessage: React.FC<{
   width: number;
   modelLabel: string;
 }> = ({ text, isThinking, width, modelLabel }) => {
-  // Use a frame counter to animate the braille spinner.
   const frame = useSpinnerFrame();
 
   return (
@@ -170,7 +186,9 @@ const StreamingMessage: React.FC<{
       </Box>
       {text.length > 0 && (
         <Box marginLeft={2}>
-          <Text color={theme.text} wrap="wrap">{truncate(text, width * 8)}</Text>
+          {/* Wrap the streaming text instead of truncating it — users want
+              to see the full in-flight response, not a truncated preview. */}
+          <Text color={theme.text} wrap="wrap">{text}</Text>
         </Box>
       )}
     </Box>
@@ -212,8 +230,12 @@ const ToolCallBadge: React.FC<{
   }
 
   const duration =
-    call.durationMs !== undefined ? ` ${(call.durationMs / 1000).toFixed(1)}s` : '';
-  const summary = call.summary ? ` ${truncate(call.summary, width - call.name.length - duration.length - 4)}` : '';
+    call.durationMs !== undefined && call.durationMs > 0
+      ? ` ${(call.durationMs / 1000).toFixed(1)}s`
+      : '';
+  const summary = call.summary
+    ? ` ${truncate(call.summary, Math.max(10, width - call.name.length - duration.length - 4))}`
+    : '';
 
   return (
     <Box>
@@ -227,20 +249,13 @@ const ToolCallBadge: React.FC<{
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
 /**
- * useSpinnerFrame — a tiny hook that cycles through spinner frames.
- * We re-implement this locally so the new oc/ components don't depend
- * on the old theme.ts (which we're deprecating).
+ * Tiny helper to make the showTimestamps flag safe in JSX conditionals.
+ * We use this to compute bodyWidth above — wrapping a boolean check in
+ * a function call looks awkward inline, so we extract it.
  */
-function useSpinnerFrame(): number {
-  const [frame, setFrame] = React.useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
-    return () => clearInterval(t);
-  }, []);
-  return frame;
+function showTimestamps_safe(v: boolean): boolean {
+  return v;
 }
 
 function formatTime(ts: number): string {

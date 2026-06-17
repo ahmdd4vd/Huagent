@@ -9,10 +9,14 @@
  *   - "warning" — warning border
  *   - "error"   — error border
  *   - "confirm" — neutral border with Yes/No footer
+ *
+ * Keyboard:
+ *   - Esc / Ctrl+C — cancel (calls onCancel if provided)
+ *   - Enter        — confirm (calls onConfirm if provided)
  */
 
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput, useApp } from 'ink';
 import { theme, glyph } from './theme.js';
 import { RoundedBorder } from './border.js';
 
@@ -22,6 +26,10 @@ export interface DialogProps {
   width?: number;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  /** Called when user presses Esc / Ctrl+C. */
+  onCancel?: () => void;
+  /** Called when user presses Enter. */
+  onConfirm?: () => void;
 }
 
 const VARIANT_BORDER: Record<NonNullable<DialogProps['variant']>, string> = {
@@ -37,8 +45,23 @@ export const Dialog: React.FC<DialogProps> = ({
   width = 60,
   children,
   footer,
+  onCancel,
+  onConfirm,
 }) => {
+  const { exit } = useApp();
   const borderColor = VARIANT_BORDER[variant];
+
+  useInput((inputChar, key) => {
+    if (key.escape || (key.ctrl && inputChar === 'c')) {
+      onCancel?.();
+      return;
+    }
+    if (key.return) {
+      onConfirm?.();
+      return;
+    }
+  });
+
   return (
     <Box
       borderStyle={RoundedBorder}
@@ -69,6 +92,10 @@ export const Dialog: React.FC<DialogProps> = ({
 
 /**
  * ConfirmDialog — a yes/no dialog with a question.
+ *
+ * Keyboard:
+ *   - y / Enter  — confirm
+ *   - n / Esc    — cancel
  */
 export interface ConfirmDialogProps {
   title?: string;
@@ -89,6 +116,17 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmLabel = 'Yes',
   cancelLabel = 'No',
 }) => {
+  useInput((inputChar, key) => {
+    if (key.escape || (key.ctrl && inputChar === 'c') || inputChar === 'n' || inputChar === 'N') {
+      onCancel();
+      return;
+    }
+    if (key.return || inputChar === 'y' || inputChar === 'Y') {
+      onConfirm();
+      return;
+    }
+  });
+
   return (
     <Dialog title={title} variant="confirm" width={width} footer="y confirm · n/esc cancel">
       <Box marginBottom={1}>
@@ -104,6 +142,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
 /**
  * AlertDialog — informational dialog with a single OK button.
+ *
+ * Keyboard:
+ *   - Enter / Esc / Space — dismiss
  */
 export interface AlertDialogProps {
   title?: string;
@@ -118,6 +159,13 @@ export const AlertDialog: React.FC<AlertDialogProps> = ({
   onDismiss,
   width = 60,
 }) => {
+  useInput((inputChar, key) => {
+    if (key.return || key.escape || (key.ctrl && inputChar === 'c') || inputChar === ' ') {
+      onDismiss();
+      return;
+    }
+  });
+
   return (
     <Dialog title={title} variant="info" width={width} footer="enter dismiss">
       <Box marginBottom={1}>
@@ -129,6 +177,9 @@ export const AlertDialog: React.FC<AlertDialogProps> = ({
 
 /**
  * HelpDialog — list of keybindings.
+ *
+ * Keyboard:
+ *   - Esc / Enter / ? — dismiss
  */
 export interface HelpDialogProps {
   onDismiss: () => void;
@@ -136,27 +187,39 @@ export interface HelpDialogProps {
 }
 
 export const HelpDialog: React.FC<HelpDialogProps> = ({ onDismiss, width = 70 }) => {
+  useInput((inputChar, key) => {
+    if (key.escape || key.return || (key.ctrl && inputChar === 'c') || inputChar === '?') {
+      onDismiss();
+      return;
+    }
+  });
+
   const keybindings: Array<[string, string]> = [
     ['Ctrl+C', 'Exit huagent'],
-    ['Ctrl+L', 'Toggle activity feed'],
     ['Ctrl+P', 'Open provider picker'],
     ['Ctrl+T', 'Open model picker'],
     ['Ctrl+E', 'Open scope picker'],
     ['Ctrl+R', 'Resume a previous session'],
     ['Ctrl+K', 'Open command palette'],
+    ['Ctrl+L', 'Clear screen'],
     ['Enter', 'Submit prompt'],
-    ['Ctrl+J', 'Insert newline (multi-line)'],
-    ['↑ / ↓', 'Navigate history / suggestions'],
+    ['Alt+Enter', 'Insert newline (multi-line)'],
+    ['Ctrl+A / E', 'Move cursor to line start / end'],
+    ['Ctrl+U / K', 'Delete to line start / end'],
+    ['Ctrl+W', 'Delete previous word'],
+    ['↑ / ↓', 'Navigate history / suggestions / lines'],
+    ['← / →', 'Move cursor horizontally'],
     ['Tab', 'Accept autocomplete suggestion'],
     ['Esc', 'Close dialog / autocomplete'],
     ['/', 'Trigger slash command autocomplete'],
+    ['?', 'Show this help'],
   ];
   return (
-    <Dialog title="Keybindings" variant="info" width={width} footer="enter dismiss">
+    <Dialog title="Keybindings" variant="info" width={width} footer="enter / ? / esc dismiss">
       <Box flexDirection="column" marginBottom={1}>
         {keybindings.map(([key, desc]) => (
           <Box key={key}>
-            <Box width={16}>
+            <Box width={18}>
               <Text color={theme.primary} bold>{key}</Text>
             </Box>
             <Text color={theme.textMuted}>{desc}</Text>

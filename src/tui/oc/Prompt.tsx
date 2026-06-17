@@ -10,22 +10,29 @@
  *   - Below the prompt: a status row with spinner + status text (when
  *     engine is running) or a "ready" hint
  *
- * Behavioral notes:
+ * Behavioral notes (matches OpenCode + standard readline):
  *   - Enter submits the prompt (single-line by default).
- *   - Shift+Enter inserts a newline (multi-line). Ink doesn't natively
- *     distinguish Shift+Enter from Enter, so we use Alt+Enter / Ctrl+J
- *     as the multi-line keybinding (matches OpenCode's behavior on
- *     terminals that don't send Shift+Enter distinctly).
+ *   - Alt+Enter OR Shift+Enter inserts a newline (multi-line). Ink
+ *     exposes `key.meta` for Alt and (in newer versions) `key.shift`
+ *     for Shift. We accept either.
  *   - Up/Down arrows navigate multi-line input when the buffer has
  *     more than one line; otherwise they navigate history.
- *   - Tab triggers autocomplete.
- *   - Ctrl+C exits. Esc closes autocomplete.
+ *   - Left/Right arrows move the cursor horizontally.
+ *   - Ctrl+A / Home — move cursor to start of line.
+ *   - Ctrl+E / End  — move cursor to end of line.
+ *   - Ctrl+U — delete from cursor to start of line.
+ *   - Ctrl+K — delete from cursor to end of line.
+ *   - Ctrl+W — delete the previous word.
+ *   - Tab — accept autocomplete suggestion (or no-op).
+ *   - Ctrl+C — request exit (calls onExit if provided, else app exit).
+ *   - Esc — close autocomplete (clears suggestions via onClearSuggestions).
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { theme, glyph, truncate } from './theme.js';
-import { LeftBorder, EmptyBorder } from './border.js';
+import { LeftBorder } from './border.js';
+import { useSpinnerFrame, SPINNER_FRAMES } from './useSpinner.js';
 
 export interface PromptStatus {
   type: 'idle' | 'thinking' | 'streaming' | 'error' | 'retry';
@@ -54,10 +61,14 @@ export interface PromptProps {
   suggestions?: Array<{ name: string; summary?: string }>;
   /** Called when user picks a suggestion (Tab/Enter on highlighted item). */
   onPickSuggestion?: (item: { name: string; summary?: string }) => void;
+  /** Called when user presses Esc with suggestions open. Parent should clear suggestions. */
+  onClearSuggestions?: () => void;
   /** Width of the prompt (terminal columns). */
   width: number;
   /** Placeholder text when input is empty. */
   placeholder?: string;
+  /** Called when user presses Ctrl+C. If not provided, exits the app. */
+  onExit?: () => void;
 }
 
 export const Prompt: React.FC<PromptProps> = ({
@@ -73,49 +84,69 @@ export const Prompt: React.FC<PromptProps> = ({
   right,
   suggestions = [],
   onPickSuggestion,
+  onClearSuggestions,
   width,
   placeholder = 'Ask, search, or run /help for commands',
+  onExit,
 }) => {
   const { exit } = useApp();
   const [cursor, setCursor] = useState(value.length);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+
+  // Keep refs in sync so closures inside useInput can read the latest
+  // values without re-subscribing to useInput on every keystroke.
   const valueRef = useRef(value);
   valueRef.current = value;
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
+  const suggestionsRef = useRef(suggestions);
+  suggestionsRef.current = suggestions;
+  const selectedSuggestionRef = useRef(selectedSuggestion);
+  selectedSuggestionRef.current = selectedSuggestion;
+  const historyRef = useRef(history);
+  historyRef.current = history;
+  const historyIdxRef = useRef(historyIdx);
+  historyIdxRef.current = historyIdx;
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
 
   // Reset suggestion selection when suggestions change.
   useEffect(() => {
     setSelectedSuggestion(0);
-  }, [suggestions.length]);
+  }, [suggestions]);
 
   // ── Input handling ───────────────────────────────────────────
   useInput((inputChar, key) => {
+    // ── Ctrl+C — request exit (with cleanup hook) ───────────────
     if (key.ctrl && inputChar === 'c') {
-      exit();
+      if (onExit) onExit();
+      else exit();
       return;
     }
 
-    // Esc closes autocomplete (clears suggestions visually).
+    // ── Esc — close autocomplete if open, else no-op ────────────
     if (key.escape) {
+      if (suggestionsRef.current.length > 0 && onClearSuggestions) {
+        onClearSuggestions();
+      }
       setSelectedSuggestion(0);
       return;
     }
 
-    // Autocomplete navigation when suggestions are shown.
-    if (suggestions.length > 0) {
+    // ── Autocomplete navigation (when suggestions are shown) ────
+    if (suggestionsRef.current.length > 0) {
       if (key.upArrow) {
         setSelectedSuggestion((i) => Math.max(0, i - 1));
         return;
       }
       if (key.downArrow) {
-        setSelectedSuggestion((i) => Math.min(suggestions.length - 1, i + 1));
+        setSelectedSuggestion((i) => Math.min(suggestionsRef.current.length - 1, i + 1));
         return;
       }
       if (key.tab) {
-        const pick = suggestions[selectedSuggestion];
+        const pick = suggestionsRef.current[selectedSuggestionRef.current];
         if (pick && onPickSuggestion) {
           onPickSuggestion(pick);
         }
@@ -123,92 +154,182 @@ export const Prompt: React.FC<PromptProps> = ({
       }
     }
 
-    // Submit on Enter (unless multi-line modifier is held).
+    const currentValue = valueRef.current;
+    const currentCursor = cursorRef.current;
+
+    // ── Enter / Return — submit, OR insert newline if Alt/Shift held ──
     if (key.return) {
-      // Ctrl+J or Alt+Enter → newline (multi-line input).
-      // Ink doesn't expose shift directly, so we use ctrl+j (0x0a) as the
-      // canonical "insert newline" keybinding.
-      if (key.ctrl && inputChar === 'j') {
-        const next = value.slice(0, cursor) + '\n' + value.slice(cursor);
+      // Alt+Enter OR Shift+Enter → insert newline (multi-line input).
+      // Ink sends `key.meta=true` for Alt+Enter and (in newer versions)
+      // `key.shift=true` for Shift+Enter. We accept either.
+      if (key.meta || key.shift) {
+        const next = currentValue.slice(0, currentCursor) + '\n' + currentValue.slice(currentCursor);
         onChange(next);
         setCursor((c) => c + 1);
         return;
       }
-      const text = value.trim();
-      if (!text || disabled) return;
+      // Plain Enter — submit (if not disabled and not empty).
+      const text = currentValue.trim();
+      if (!text || disabledRef.current) return;
       setHistory((h) => [...h, text].slice(-50));
       setHistoryIdx(-1);
       onSubmit(text);
       return;
     }
 
-    // History navigation (only when input is single-line).
-    if (!value.includes('\n')) {
-      if (key.upArrow && history.length > 0) {
-        const nextIdx = historyIdx === -1 ? history.length - 1 : Math.max(0, historyIdx - 1);
-        setHistoryIdx(nextIdx);
-        onChange(history[nextIdx] ?? '');
-        setCursor((history[nextIdx] ?? '').length);
-        return;
-      }
-      if (key.downArrow && historyIdx !== -1) {
-        const nextIdx = historyIdx + 1;
-        if (nextIdx >= history.length) {
-          setHistoryIdx(-1);
-          onChange('');
-          setCursor(0);
-        } else {
-          setHistoryIdx(nextIdx);
-          onChange(history[nextIdx] ?? '');
-          setCursor((history[nextIdx] ?? '').length);
-        }
-        return;
-      }
+    // ── Left/Right arrows — horizontal cursor movement ──────────
+    if (key.leftArrow) {
+      setCursor((c) => Math.max(0, c - 1));
+      return;
+    }
+    if (key.rightArrow) {
+      setCursor((c) => Math.min(currentValue.length, c + 1));
+      return;
     }
 
-    // Multi-line cursor movement with arrows.
-    if (value.includes('\n')) {
-      if (key.upArrow) {
-        const before = value.slice(0, cursor);
-        const nlIdx = before.lastIndexOf('\n');
-        if (nlIdx > 0) {
-          const prevLineStart = before.slice(0, nlIdx).lastIndexOf('\n') + 1;
-          const col = cursor - nlIdx - 1;
-          const newPos = Math.max(prevLineStart, prevLineStart + Math.min(col, nlIdx - prevLineStart - 1));
-          setCursor(newPos);
-          return;
-        }
-      }
-      if (key.downArrow) {
-        const after = value.slice(cursor);
-        const nlIdx = after.indexOf('\n');
-        if (nlIdx !== -1) {
-          const nextLineStart = cursor + nlIdx + 1;
-          const before = value.slice(0, cursor);
-          const col = cursor - (before.lastIndexOf('\n') + 1);
-          const nextNl = value.indexOf('\n', nextLineStart);
-          const nextLineEnd = nextNl === -1 ? value.length : nextNl;
-          const newPos = Math.min(nextLineEnd, nextLineStart + col);
-          setCursor(newPos);
-          return;
-        }
-      }
+    // ── Ctrl+A / Home — move cursor to start of line ───────────
+    // ── Ctrl+E / End  — move cursor to end of line ──────────────
+    if ((key.ctrl && inputChar === 'a') || (key as any).home) {
+      // Move to start of the current line (not start of buffer).
+      const lineStart = currentValue.lastIndexOf('\n', currentCursor - 1) + 1;
+      setCursor(lineStart);
+      return;
+    }
+    if ((key.ctrl && inputChar === 'e') || (key as any).end) {
+      // Move to end of the current line.
+      const nextNl = currentValue.indexOf('\n', currentCursor);
+      setCursor(nextNl === -1 ? currentValue.length : nextNl);
+      return;
     }
 
-    // Backspace
-    if (key.backspace || key.delete) {
-      if (cursor > 0) {
-        const removed = value[cursor - 1] === '\n' ? 1 : 1;
-        const next = value.slice(0, cursor - removed) + value.slice(cursor);
+    // ── Ctrl+U — delete from cursor to start of line ───────────
+    if (key.ctrl && inputChar === 'u') {
+      const lineStart = currentValue.lastIndexOf('\n', currentCursor - 1) + 1;
+      if (currentCursor > lineStart) {
+        const next = currentValue.slice(0, lineStart) + currentValue.slice(currentCursor);
         onChange(next);
-        setCursor((c) => Math.max(0, c - removed));
+        setCursor(lineStart);
       }
       return;
     }
 
-    // Regular character
-    if (inputChar && !key.ctrl && !key.meta) {
-      const next = value.slice(0, cursor) + inputChar + value.slice(cursor);
+    // ── Ctrl+K — delete from cursor to end of line ─────────────
+    if (key.ctrl && inputChar === 'k') {
+      const nextNl = currentValue.indexOf('\n', currentCursor);
+      const lineEnd = nextNl === -1 ? currentValue.length : nextNl;
+      if (currentCursor < lineEnd) {
+        const next = currentValue.slice(0, currentCursor) + currentValue.slice(lineEnd);
+        onChange(next);
+      }
+      return;
+    }
+
+    // ── Ctrl+W — delete the previous word ──────────────────────
+    if (key.ctrl && inputChar === 'w') {
+      // Find the start of the previous word. A "word" here is a run of
+      // non-whitespace chars; we skip whitespace backwards first.
+      let i = currentCursor - 1;
+      while (i >= 0 && /\s/.test(currentValue[i])) i--;
+      while (i >= 0 && !/\s/.test(currentValue[i])) i--;
+      const wordStart = i + 1;
+      if (wordStart < currentCursor) {
+        const next = currentValue.slice(0, wordStart) + currentValue.slice(currentCursor);
+        onChange(next);
+        setCursor(wordStart);
+      }
+      return;
+    }
+
+    // ── Up/Down arrows — history navigation OR multi-line cursor ──
+    // When the input is single-line, ↑/↓ navigate history.
+    // When the input is multi-line, ↑/↓ move the cursor between lines.
+    if (!currentValue.includes('\n')) {
+      if (key.upArrow && historyRef.current.length > 0) {
+        const nextIdx = historyIdxRef.current === -1
+          ? historyRef.current.length - 1
+          : Math.max(0, historyIdxRef.current - 1);
+        const restored = historyRef.current[nextIdx] ?? '';
+        setHistoryIdx(nextIdx);
+        onChange(restored);
+        setCursor(restored.length);
+        return;
+      }
+      if (key.downArrow && historyIdxRef.current !== -1) {
+        const nextIdx = historyIdxRef.current + 1;
+        if (nextIdx >= historyRef.current.length) {
+          setHistoryIdx(-1);
+          onChange('');
+          setCursor(0);
+        } else {
+          const restored = historyRef.current[nextIdx] ?? '';
+          setHistoryIdx(nextIdx);
+          onChange(restored);
+          setCursor(restored.length);
+        }
+        return;
+      }
+    } else {
+      // Multi-line cursor movement with arrows.
+      if (key.upArrow) {
+        const before = currentValue.slice(0, currentCursor);
+        const nlIdx = before.lastIndexOf('\n');
+        if (nlIdx !== -1) {
+          // There's a previous line. Find its start and length.
+          const prevLineStart = before.slice(0, nlIdx).lastIndexOf('\n') + 1;
+          const col = currentCursor - nlIdx - 1; // column on current line
+          const prevLineLen = nlIdx - prevLineStart;
+          const newPos = prevLineStart + Math.min(col, prevLineLen);
+          setCursor(newPos);
+          return;
+        }
+        // No previous line — move to start of buffer.
+        setCursor(0);
+        return;
+      }
+      if (key.downArrow) {
+        const after = currentValue.slice(currentCursor);
+        const nlIdx = after.indexOf('\n');
+        if (nlIdx !== -1) {
+          // There's a next line. Find its start and length.
+          const nextLineStart = currentCursor + nlIdx + 1;
+          const before = currentValue.slice(0, currentCursor);
+          const col = currentCursor - (before.lastIndexOf('\n') + 1);
+          const nextNl = currentValue.indexOf('\n', nextLineStart);
+          const nextLineEnd = nextNl === -1 ? currentValue.length : nextNl;
+          const nextLineLen = nextLineEnd - nextLineStart;
+          const newPos = nextLineStart + Math.min(col, nextLineLen);
+          setCursor(newPos);
+          return;
+        }
+        // No next line — move to end of buffer.
+        setCursor(currentValue.length);
+        return;
+      }
+    }
+
+    // ── Backspace / Delete ──────────────────────────────────────
+    if (key.backspace || key.delete) {
+      if (currentCursor > 0) {
+        // Removing one char (whether it's \n or a regular char).
+        const next = currentValue.slice(0, currentCursor - 1) + currentValue.slice(currentCursor);
+        onChange(next);
+        setCursor((c) => Math.max(0, c - 1));
+      }
+      return;
+    }
+
+    // ── Regular character (including space, punctuation, etc.) ──
+    // Ink fires this for printable ASCII chars. We skip ctrl/meta combos
+    // (handled above) so we don't insert stray control chars into the buffer.
+    if (inputChar && !key.ctrl && !key.meta && !key.return && !key.tab) {
+      // Filter out non-printable chars (e.g. escape sequences that leaked
+      // through). We accept any char in the printable ASCII range (0x20-0x7E)
+      // plus common Unicode (Japanese, Korean, emoji, etc. — codepoint > 0x7F).
+      const code = inputChar.codePointAt(0);
+      if (code === undefined) return;
+      const isPrintable = (code >= 0x20 && code <= 0x7e) || code > 0xa0;
+      if (!isPrintable) return;
+      const next = currentValue.slice(0, currentCursor) + inputChar + currentValue.slice(currentCursor);
       onChange(next);
       setCursor((c) => c + inputChar.length);
       return;
@@ -228,22 +349,25 @@ export const Prompt: React.FC<PromptProps> = ({
       {/* Autocomplete suggestions (above prompt, OpenCode-style) */}
       {suggestions.length > 0 && (
         <Box flexDirection="column" paddingLeft={1} paddingBottom={0}>
-          {suggestions.map((s, i) => (
-            <Box key={s.name}>
-              <Text color={i === selectedSuggestion ? theme.primary : theme.textMuted}>
-                {i === selectedSuggestion ? '▶ ' : '  '}
-              </Text>
-              <Text color={i === selectedSuggestion ? theme.text : theme.textMuted} bold={i === selectedSuggestion}>
-                {truncate(s.name, 24)}
-              </Text>
-              {s.summary && (
-                <Text color={i === selectedSuggestion ? theme.textMuted : theme.border}>
-                  {'  '}{truncate(s.summary, width - s.name.length - 6)}
+          {suggestions.map((s, i) => {
+            const isSelected = i === selectedSuggestion;
+            return (
+              <Box key={s.name}>
+                <Text color={isSelected ? theme.primary : theme.textMuted}>
+                  {isSelected ? '▶ ' : '  '}
                 </Text>
-              )}
-            </Box>
-          ))}
-          <Text color={theme.textMuted} dimColor>  ↵ enter · tab accept · esc close</Text>
+                <Text color={isSelected ? theme.text : theme.textMuted} bold={isSelected}>
+                  {truncate(s.name, 24)}
+                </Text>
+                {s.summary && (
+                  <Text color={isSelected ? theme.textMuted : theme.border}>
+                    {'  '}{truncate(s.summary, Math.max(10, width - s.name.length - 6))}
+                  </Text>
+                )}
+              </Box>
+            );
+          })}
+          <Text color={theme.textMuted} dimColor>  ↵ enter · tab accept · esc close · ↑↓ navigate</Text>
         </Box>
       )}
 
@@ -257,16 +381,14 @@ export const Prompt: React.FC<PromptProps> = ({
         paddingTop={0}
         paddingBottom={0}
       >
-        {/* Textarea area — use a Text with backgroundColor to get the OpenCode
-            "elevated background" effect since Ink's Box doesn't support
-            backgroundColor directly. */}
+        {/* Textarea area */}
         <Box paddingLeft={1} paddingRight={1} paddingTop={0} paddingBottom={0}>
           <TextareaView
             value={value}
             cursor={cursor}
             disabled={disabled}
             placeholder={placeholder}
-            width={width - 6}
+            width={Math.max(10, width - 6)}
           />
         </Box>
 
@@ -317,8 +439,7 @@ const TextareaView: React.FC<{
   if (!value) {
     return (
       <Text color={disabled ? theme.border : theme.textMuted}>
-        {placeholder}
-        <Text color={theme.text}> </Text>
+        {truncate(placeholder, width)}
       </Text>
     );
   }
@@ -338,10 +459,15 @@ const TextareaView: React.FC<{
     charCount += lineLen + 1; // +1 for the \n
   }
 
+  // If the cursor is at the very end of the buffer and the last char is \n,
+  // we end up with an extra empty line that should show a cursor.
+  const isCursorOnEmptyLastLine =
+    cursor === value.length && value.endsWith('\n');
+
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => {
-        const isCursorLine = i === cursorLine;
+        const isCursorLine = i === cursorLine && !isCursorOnEmptyLastLine;
         if (isCursorLine) {
           const before = line.slice(0, cursorCol);
           const at = line.slice(cursorCol, cursorCol + 1);
@@ -360,6 +486,11 @@ const TextareaView: React.FC<{
           </Box>
         );
       })}
+      {isCursorOnEmptyLastLine && (
+        <Box>
+          <Text color={theme.primary} inverse> </Text>
+        </Box>
+      )}
     </Box>
   );
 };
@@ -372,7 +503,7 @@ const StatusRow: React.FC<{ status: PromptStatus; disabled: boolean }> = ({ stat
     return (
       <Box flexDirection="row" gap={1}>
         <Text color={theme.textMuted}>  ready</Text>
-        <Text color={theme.textMuted} dimColor>· ↵ send · ctrl+j newline · ↑↓ history · tab complete</Text>
+        <Text color={theme.textMuted} dimColor>· ↵ send · alt+↵ newline · ↑↓ history · tab complete · ctrl+c exit</Text>
       </Box>
     );
   }
@@ -410,16 +541,3 @@ const StatusRow: React.FC<{ status: PromptStatus; disabled: boolean }> = ({ stat
   }
   return null;
 };
-
-// ─── Helpers ─────────────────────────────────────────────────────
-
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-function useSpinnerFrame(): number {
-  const [frame, setFrame] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 80);
-    return () => clearInterval(t);
-  }, []);
-  return frame;
-}

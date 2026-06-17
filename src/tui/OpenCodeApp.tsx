@@ -19,7 +19,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Box, Text, useApp } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import { MessageList, type ChatMessage } from './oc/MessageList.js';
 import { Prompt, type PromptStatus } from './oc/Prompt.js';
 import { Footer } from './oc/Footer.js';
@@ -158,13 +158,68 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
   const autonomousRef = useRef(autonomous);
   autonomousRef.current = autonomous;
 
-  // ── Terminal width tracking ──────────────────────────────────
+  // ── Terminal width/height tracking (responsive layout) ───────
   const [width, setWidth] = useState(process.stdout.columns || 100);
+  const [height, setHeight] = useState(process.stdout.rows || 40);
   useEffect(() => {
-    const onResize = () => setWidth(process.stdout.columns || 100);
+    const onResize = () => {
+      setWidth(process.stdout.columns || 100);
+      setHeight(process.stdout.rows || 40);
+    };
     process.stdout.on('resize', onResize);
     return () => { process.stdout.off('resize', onResize); };
   }, []);
+
+  // ── Global keyboard shortcuts (work alongside the Prompt's useInput) ──
+  // These are the OpenCode-style "leader" shortcuts. They're only active
+  // when no picker / dialog is open (otherwise the picker/dialog gets
+  // priority for the same keys).
+  useInput((inputChar, key) => {
+    // If a picker or dialog is open, defer to its useInput handler.
+    if (picker || dialogState.question || dialogState.permission || dialogState.plan || showHelp) {
+      return;
+    }
+
+    // Ctrl+P — provider picker (skip if upArrow, since some terminals send
+    // Ctrl+P as up-arrow when in cooked mode).
+    if (key.ctrl && inputChar === 'p' && !key.upArrow) {
+      openPicker('provider');
+      return;
+    }
+    // Ctrl+T — model picker.
+    if (key.ctrl && inputChar === 't') {
+      openPicker('model');
+      return;
+    }
+    // Ctrl+E — scope picker.
+    if (key.ctrl && inputChar === 'e') {
+      openPicker('scope');
+      return;
+    }
+    // Ctrl+R — session resume picker.
+    if (key.ctrl && inputChar === 'r' && !key.shift) {
+      openPicker('session');
+      return;
+    }
+    // Ctrl+K — command palette (for now, just show a toast since we don't
+    // have a full palette implementation).
+    if (key.ctrl && inputChar === 'k') {
+      pushToast('info', 'Command palette — type / and Tab for slash commands');
+      return;
+    }
+    // Ctrl+L — clear screen (clear messages).
+    if (key.ctrl && inputChar === 'l') {
+      setMessages([]);
+      pushToast('info', 'Cleared messages');
+      return;
+    }
+    // ? — show help dialog (only when input is empty, so users can type
+    // ? in their message without triggering help).
+    if (inputChar === '?' && input === '') {
+      setShowHelp(true);
+      return;
+    }
+  });
 
   // ── Toast helper ─────────────────────────────────────────────
   const pushToast = useCallback((level: 'info' | 'success' | 'warning' | 'error', message: string) => {
@@ -202,17 +257,8 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
     }
   }, [autonomous]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Engine events (streaming, thinking, tool calls) ──────────
-  useEffect(() => {
-    const engineAny = engine as any;
-    if (typeof engineAny.on === 'function') {
-      engineAny.on('event', (event: EngineEvent) => handleEngineEvent(event));
-    }
-    if (typeof engineAny.onEvent === 'function') {
-      engineAny.onEvent((event: EngineEvent) => handleEngineEvent(event));
-    }
-  }, [engine]);
-
+  // ── Engine event handler (defined before useEffect so the subscription
+  //    below can reference it without TDZ issues) ─────────────────
   const handleEngineEvent = useCallback((event: EngineEvent) => {
     switch (event.type) {
       case 'thinking':
@@ -320,6 +366,19 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
         break;
     }
   }, [pushToast]);
+
+  // ── Engine events subscription ───────────────────────────────
+  // The Engine accepts an `onEvent` callback via constructor options
+  // (NOT an `on()` method). cli.tsx wires the engine's onEvent to
+  // `dialogController.publishEvent`, so we subscribe to engine events
+  // via the dialogController's event bus instead of trying to attach
+  // a listener directly to the engine.
+  useEffect(() => {
+    const unsub = dialogController.subscribeEvents((event: EngineEvent) => {
+      handleEngineEvent(event);
+    });
+    return unsub;
+  }, [dialogController, handleEngineEvent]);
 
   // ── Submit handler ───────────────────────────────────────────
   const handleSubmit = useCallback(async (text: string) => {
@@ -620,7 +679,7 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
   }));
 
   return (
-    <Box flexDirection="column" height={process.stdout.rows || 40} width={width}>
+    <Box flexDirection="column" height={height} width={width}>
       {/* Toasts (top-right, ephemeral) */}
       {toasts.length > 0 && (
         <Box flexDirection="column" paddingLeft={1}>
@@ -728,6 +787,8 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
               setInput(item.name + ' ');
               setSuggestions([]);
             }}
+            onClearSuggestions={() => setSuggestions([])}
+            onExit={onExit}
             width={width - 4}
             placeholder="Ask, search, or run /help for commands"
           />
@@ -745,16 +806,35 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
         />
       </Box>
 
-      {/* Hidden help trigger — renders a hint at the very bottom. */}
+      {/* Stats hint at the very bottom — shown only when no overlay is active.
+          Kept on a single line; truncated if terminal is narrow. */}
       {!picker && !dialogState.question && !dialogState.permission && !dialogState.plan && !showHelp && (
         <Box paddingLeft={2} paddingRight={2}>
-          <Text color={theme.textMuted} dimColor>
-            {' '}tokens: {stats.tokens} · cost: ${stats.cost.toFixed(4)} · {permissionMode}
-            {autonomous ? ' · auto' : ''}
-            {scope ? ` · scope: ${truncate(scope, 20)}` : ''}
-            {'  ·  '}
-            <Text color={theme.primary}>?</Text> help
-          </Text>
+          <Box flexDirection="row" gap={2}>
+            <Text color={theme.textMuted} dimColor>
+              <Text color={theme.text}>tokens:</Text> {stats.tokens}
+            </Text>
+            <Text color={theme.textMuted} dimColor>
+              <Text color={theme.text}>cost:</Text> ${stats.cost.toFixed(4)}
+            </Text>
+            <Text color={theme.textMuted} dimColor>
+              <Text color={theme.text}>perm:</Text> {permissionMode}
+            </Text>
+            {autonomous && (
+              <Text color={theme.warning} bold>auto</Text>
+            )}
+            {scope && (
+              <Text color={theme.textMuted} dimColor>
+                <Text color={theme.text}>scope:</Text> {truncate(scope, 20)}
+              </Text>
+            )}
+            <Text color={theme.textMuted} dimColor>
+              <Text color={theme.primary}>?</Text> help
+            </Text>
+            <Text color={theme.textMuted} dimColor>
+              <Text color={theme.primary}>Ctrl+P</Text>/<Text color={theme.primary}>T</Text>/<Text color={theme.primary}>E</Text>/<Text color={theme.primary}>R</Text> pickers
+            </Text>
+          </Box>
         </Box>
       )}
     </Box>
