@@ -141,6 +141,7 @@ export class ActivityStore {
    * Finish an activity. Convenience: update({ status, ...rest }).
    */
   finish(id: string, status: ActivityStatus, opts?: { summary?: string; detail?: string }): void {
+    if (!id) return; // Guard against empty id from getLastActivity fallback
     // Build patch carefully — only include keys that are actually defined,
     // so we don't accidentally clobber the activity's existing summary/detail.
     const patch: Partial<Activity> = { status };

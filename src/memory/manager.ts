@@ -87,11 +87,18 @@ export class MemoryManager {
       }
     }
 
-    // Sort by importance + recency
+    // Sort by importance + recency (exponential decay for time)
+    // Half-life: 24 hours. A memory from 1 day ago scores 0.5x, 2 days = 0.25x, etc.
+    const now = Date.now();
+    const HALF_LIFE_MS = 24 * 60 * 60 * 1000;
     return results
       .sort((a, b) => {
-        const scoreA = a.importance * 0.7 + (a.lastAccessed / Date.now()) * 0.3;
-        const scoreB = b.importance * 0.7 + (b.lastAccessed / Date.now()) * 0.3;
+        const ageA = Math.max(0, now - a.lastAccessed);
+        const ageB = Math.max(0, now - b.lastAccessed);
+        const recencyA = Math.pow(0.5, ageA / HALF_LIFE_MS);
+        const recencyB = Math.pow(0.5, ageB / HALF_LIFE_MS);
+        const scoreA = a.importance * 0.6 + recencyA * 0.4;
+        const scoreB = b.importance * 0.6 + recencyB * 0.4;
         return scoreB - scoreA;
       })
       .slice(0, limit);

@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-FF6B9D?style=flat-square)](LICENSE)
 [![Providers](https://img.shields.io/badge/providers-22-7B61FF?style=flat-square)](#providers)
 [![Models](https://img.shields.io/badge/models-101-FFA500?style=flat-square)](#providers)
-[![Tests](https://img.shields.io/badge/tests-870%2B-4CAF50?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-900%2B-4CAF50?style=flat-square)](#testing)
 
 A production-grade AI coding agent in your terminal. Stream-native engine, modern TUI, type-safe multi-provider abstraction. Built for developers who want Claude-Code-class capabilities with full provider flexibility.
 
@@ -123,9 +123,13 @@ huagent             # then type:
 
 - **22 LLM providers** out of the box, 101 models with pricing + capabilities
 - **Stream-native engine** — type-safe SSE, automatic tool-call accumulation, accurate cost tracking
-- **Modern TUI** — width-adaptive (40–240+ cols), no emoji, modern palette
+- **WllmConcept** — wiki knowledge engine with 5-memory system (semantic, episodic, structural, causal, meta)
+- **Auto-Ingest** — file watcher that automatically extracts entities, concepts, and creates wiki pages
+- **Scheduled Lint** — periodic wiki quality audit with 7 checks and auto-fix
+- **Evolve** — self-reflection engine that finds contradictions, suggests new pages, and refreshes stale knowledge
+- **Modern TUI** — width-adaptive (40–240+ cols), syntax highlighting, diff view, file tree, progress indicators
+- **UX Polish** — user-friendly error messages, smart autocomplete, clickable file paths, enhanced loading states
 - **Discipline layer** — every task goes through Plan → Ground → Observe → Diagnose → Verify
-- **WllmConcept** — wiki knowledge engine with semantic search, evolution, provenance
 - **26 slash commands** — full runtime control over model, provider, mode, scope, memory
 - **5 permission modes** — read-only, workspace-write, sandboxed, danger-full-access, custom
 - **Auto-detect** — set an env var, huagent figures out the provider
@@ -190,7 +194,7 @@ huagent --version
 
 ## Testing
 
-870+ tests across 5 suites:
+900+ tests across 8 suites:
 
 ```bash
 npm test
@@ -203,6 +207,10 @@ npm test
 | `tests/tui-v4.test.ts` | 119 | Theme, activity store, status, activity feed, slash commands |
 | `tests/discipline.test.ts` | 181 | Plan/Ground/Observe/Diagnose/Verify cycle |
 | `tests/cli-commands.test.ts` | 68 | parseOptions, all 26 slash commands |
+| `tests/wllm-integration.test.ts` | 26 | WikiMemory, 5-memory routing, lint, evolve |
+| `tests/auto-ingest.test.ts` | 40 | Content analyzer, file watcher, auto page creation |
+| `tests/tui-polish.test.ts` | 40 | Syntax highlighting, diff view, file tree, progress |
+| `tests/ux-polish.test.ts` | 40 | Error handler, autocomplete, clickable paths, loading |
 
 ```bash
 npm run verify     # lint + test + build
@@ -217,13 +225,28 @@ src/
 ├── cli.tsx              # entry point, arg parsing, bootstrap
 ├── providers/           # 22-provider registry, 101-model list, unified client
 ├── engine/v4/           # stream-native actor model, discipline layer
-├── tui/                 # modern TUI (width-adaptive)
+├── tui/                 # modern TUI with syntax highlighting, diff view, progress
 ├── tools/               # bash, file ops, git, search
 ├── memory/              # SQLite-backed memory
-├── wllm/                # wiki concept engine
+├── wllm/                # wiki concept engine (5-memory system)
+│   ├── graph/           # WikiStore (bi-temporal property graph)
+│   ├── ingest/          # content analyzer + auto-ingest service
+│   ├── lint/            # scheduled lint (7 checks, A-F grading)
+│   └── evolve/          # self-reflection (contradictions, suggestions, refresh)
 ├── sessions.ts          # session save/load
 └── slash-commands.ts    # 26 slash commands
 ```
+
+## Documentation
+
+- [User Guide](docs/USER_GUIDE.md) — Getting started, configuration, usage
+- [Architecture](docs/ARCHITECTURE.md) — System design, engine, TUI
+- [Contributing](.github/CONTRIBUTING.md) — How to contribute
+- [API Reference](docs/API_REFERENCE.md) — Full API documentation
+- [WllmConcept Guide](docs/WLLMCONCEPT_GUIDE.md) — Wiki knowledge engine
+- [Auto-Ingest Guide](docs/AUTO_INGEST_GUIDE.md) — File watcher + content analysis
+- [TUI Polish Guide](docs/PHASE3_TUI_POLISH_GUIDE.md) — Syntax highlighting, diff view
+- [UX Polish Guide](docs/PHASE4_UX_POLISH_GUIDE.md) — Error messages, autocomplete
 
 ## Contributing
 

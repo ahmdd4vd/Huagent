@@ -24,8 +24,13 @@ export const grepTool = {
     const include = args.include || '*';
     const caseFlag = args.caseSensitive ? '' : '-i';
 
+    // Escape shell arguments to prevent command injection
+    const safePattern = args.pattern.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+    const safeInclude = include.replace(/"/g, '\\"').replace(/'/g, "\\'");
+    const safeTarget = target.replace(/"/g, '\\"');
+
     // Use rg if available, fallback to grep
-    let cmd = `rg ${caseFlag} --line-number --no-heading --max-count=${max} -g '${include}' "${args.pattern.replace(/"/g, '\\"')}" "${target}"`;
+    let cmd = `rg ${caseFlag} --line-number --no-heading --max-count=${max} -g "${safeInclude}" "${safePattern}" "${safeTarget}"`;
 
     try {
       const { stdout } = await execAsync(cmd, { maxBuffer: 5_000_000 });
@@ -45,7 +50,7 @@ export const grepTool = {
         return { pattern: args.pattern, count: 0, matches: [] };
       }
       // Fallback to grep
-      const fallback = `grep -rn ${caseFlag} -E --include='${include}' "${args.pattern.replace(/"/g, '\\"')}" "${target}" | head -${max}`;
+      const fallback = `grep -rn ${caseFlag} -E --include="${safeInclude}" "${safePattern}" "${safeTarget}" | head -${max}`;
       try {
         const { stdout } = await execAsync(fallback, { maxBuffer: 5_000_000 });
         const lines = stdout.trim().split('\n').filter(Boolean);

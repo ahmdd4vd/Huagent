@@ -1,14 +1,11 @@
-// CLI entry point for huagent v4.0
-// Integrates: streaming, permissions, sessions, slash commands, status bar, v4 engine
+// CLI entry point for Huagent
+// Integrates: streaming, permissions, sessions, slash commands, status bar, unified engine
 
 import { Command } from 'commander';
 import React from 'react';
 import { render } from 'ink';
-import { App } from './tui/App.js';
 import { ModernApp } from './tui/ModernApp.js';
 import { Engine } from './engine/core.js';
-import { EngineV4 } from './engine/v4/index.js';
-import { InMemoryGraphStore } from './engine/v4/index.js';
 import { UnifiedClient } from './providers/client.js';
 import { PROVIDERS, detectProviderFromEnv, type ProviderId } from './providers/registry.js';
 import { MemoryStore } from './memory/store.js';
@@ -22,9 +19,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { theme, fg, sparkleText as sparkle, gradient } from './tui/theme.js';
 import { mascots } from './tui/mascot.js';
 import { config as loadDotenv } from 'dotenv';
-import { runWithV4, formatEvent } from './engine/v4-runner.js';
 import { runOnboarding } from './onboarding/wizard.js';
-import { detectProviderFromEnv as _detect } from './providers/registry.js';
+
 
 loadDotenv();
 
@@ -38,7 +34,7 @@ try {
   VERSION = pkg.version;
 } catch {
   // Fall back to a constant if package.json can't be read
-  VERSION = '4.1.0';
+  VERSION = '4.3.1';
 }
 const CONFIG_DIR = join(homedir(), '.huagent');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
@@ -51,12 +47,6 @@ interface Config {
   baseUrl?: string;
   workdir: string;
   permissionMode?: string;
-  /** Engine version: 'v3' (default) or 'v4' (stream-native actor model) */
-  engine?: 'v3' | 'v4';
-  /** v4 speculation budget in ms (default 5000) */
-  speculationBudgetMs?: number;
-  /** v4 quality threshold (default 0.7) */
-  qualityThreshold?: number;
   /** Autonomous mode: no confirmations, all bash auto-allow (default: false) */
   autonomous?: boolean;
   /** File scope: limit agent edits to this single file (default: null = multi-file) */
@@ -77,13 +67,13 @@ function loadConfig(): Config {
   }
 
   return {
-    provider: (process.env.HUAGENT_PROVIDER as any) || 'mock',
-    model: process.env.HUAGENT_MODEL || 'huagent-mock-1',
-    apiKey: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.TOKENROUTER_API_KEY,
+    provider: (process.env.HUAGENT_PROVIDER as any) || 'custom',
+    model: process.env.HUAGENT_MODEL || 'MiniMax-M3',
+    apiKey: process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || process.env.TOKENROUTER_API_KEY
+      || process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.GROQ_API_KEY || '',
     baseUrl: process.env.HUAGENT_BASE_URL,
     workdir: process.cwd(),
     permissionMode: 'workspace-write',
-    engine: (process.env.HUAGENT_ENGINE as 'v3' | 'v4') || 'v3',
   };
 }
 
@@ -144,7 +134,7 @@ export async function run(args: string[]): Promise<void> {
       // Handle --key=value format
       const isKeyValue = arg.startsWith("--") && arg.includes("=");
       const keyOnly = isKeyValue ? arg.slice(0, arg.indexOf("=")) : arg;
-      if (['--dir', '-d', '--provider', '-p', '--model', '-m', '--api-key', '--base-url', '--perm', '--engine', '--quality-threshold', '--speculation-budget-ms', '--scope'].includes(keyOnly)) {
+      if (['--dir', '-d', '--provider', '-p', '--model', '-m', '--api-key', '--base-url', '--perm', '--scope'].includes(keyOnly)) {
         if (!isKeyValue) i++;  // skip value if not --key=value
       }
       continue;
@@ -179,9 +169,6 @@ function parseOptions(argList: string[]): any {
     else if (arg === '--api-key') options.apiKey = value ?? argList[++i];
     else if (arg === '--base-url') options.baseUrl = value ?? argList[++i];
     else if (arg === '--perm') options.permissionMode = value ?? argList[++i];
-    else if (arg === '--engine') options.engine = value ?? argList[++i];
-    else if (arg === '--quality-threshold') options.qualityThreshold = parseFloat(value ?? argList[++i]);
-    else if (arg === '--speculation-budget-ms') options.speculationBudgetMs = parseInt(value ?? argList[++i], 10);
     // ── Autoresearch-inspired flags ────────────────────────────
     else if (arg === '--autonomous' || arg === '--auto') options.autonomous = true;
     else if (arg === '--no-autonomous') options.autonomous = false;
@@ -213,33 +200,17 @@ ${fg(theme.primary, 'OPTIONS:')}
   --perm <mode>              ${fg(theme.fgDim, 'Permission: read-only | workspace-write | danger-full-access')}
   --no-tui                   ${fg(theme.fgDim, 'Disable TUI (one-shot)')}
   --tui <mode>               ${fg(theme.fgDim, 'TUI mode: modern (default) | legacy')}
-  --engine <v3|v4>           ${fg(theme.fgDim, 'Engine version: v3 (ReAct) or v4 (stream-native actor model)')}
-  --quality-threshold <0-1>  ${fg(theme.fgDim, 'v4: race winner quality threshold (default 0.7)')}
-  --speculation-budget-ms <ms>  ${fg(theme.fgDim, 'v4: speculation race budget in ms (default 5000)')}
 
-${fg(theme.primary, 'AUTONOMY & SCOPE (autoresearch-inspired):')}
+${fg(theme.primary, 'AUTONOMY & SCOPE:')}
   --autonomous               ${fg(theme.fgDim, 'Start in autonomous mode: no confirmations, all bash auto-allow')}
   --no-autonomous            ${fg(theme.fgDim, 'Disable autonomous mode (default)')}
   --scope <file>             ${fg(theme.fgDim, 'Limit agent edits to this single file only')}
 
-${fg(theme.primary, 'ENGINE v4.0 (Stream-Native Actor Model):')}
-  --engine=v4 enables 8 novel primitives:
-  - Stream-native architecture (events, not loop)
-  - HTN planning (parallel subgoals)
-  - Speculative execution (3-strategy race)
-  - 3-critic mesh verification
-  - Bi-temporal memory graph
-  - Composable capability pipelines
-  - Self-healing actor supervision
-  - Discipline layer (Fable-5 mindset: plan, observe, ground, verify, diagnose)
-
 ${fg(theme.primary, 'EXAMPLES:')}
-  huagent "fix the auth bug" --engine=v4
-  huagent "add OAuth" --engine=v4 --quality-threshold=0.8
-  huagent "what is JWT?" --engine=v4 --no-tui
-  huagent "refactor auth" --engine=v4 --speculation-budget-ms=10000
-  huagent "fix the JWT bug" --engine=v4 --autonomous         ${fg(theme.fgDim, '# autoresearch-style: never stop')}
-  huagent "refactor auth.ts" --engine=v4 --scope=src/auth.ts ${fg(theme.fgDim, '# autoresearch-style: 1 file only')}
+  huagent "fix the auth bug"
+  huagent "add OAuth" --no-tui
+  huagent "fix the JWT bug" --autonomous
+  huagent "refactor auth.ts" --scope=src/auth.ts
 
 ${fg(theme.primary, 'TUI COMMANDS (type / to start):')}
   /help, /status, /cost, /clear, /compact
@@ -308,77 +279,6 @@ function cmdSkills(): void {
   store.close();
 }
 
-/**
- * Run a task using the v4.0 engine.
- *
- * This is the main entry point for v4.0 in the CLI. It:
- * 1. Creates a v4 engine with the configured LLM provider
- * 2. Streams events to stdout (one-shot mode) or TUI
- * 3. Returns the final result
- */
-async function runV4Engine(
-  message: string | undefined,
-  config: Config,
-  options: any,
-): Promise<void> {
-  console.log(`${mascots.smallHua} ${fg(theme.sakura, '⚡ v4.0 Stream-Native Actor Model')}`);
-  console.log(`${mascots.smallHua} ${fg(theme.sky, '7 primitives: Stream, HTN, Speculation, Critic Mesh, Graph, Capability, Actor')}`);
-
-  // No message → TUI in v4 mode (one-shot only for now; TUI in v3 mode)
-  if (!message) {
-    console.log(`${mascots.sleepHua} ${fg(theme.fgDim, 'TUI mode with v4 engine is not yet supported. Please provide a message.')}`);
-    console.log(`${mascots.sleepHua} ${fg(theme.fgDim, 'Example: huagent "fix the auth bug" --engine=v4')}`);
-    return;
-  }
-
-  // One-shot mode
-  console.log(`\n${fg(theme.fgDim, '✧ Running v4.0 engine...')}\n`);
-
-  // Stream events as they happen
-  const onEvent = (e: any) => {
-    // Print high-signal events only
-    if (
-      e.kind === "classified" ||
-      e.kind === "htn_plan" ||
-      e.kind === "speculation_started" ||
-      e.kind === "speculation_winner" ||
-      e.kind === "mesh_verdict" ||
-      e.kind === "episode_recorded" ||
-      e.kind === "actor_started" ||
-      e.kind === "actor_crashed" ||
-      e.kind === "actor_restarted"
-    ) {
-      console.log(`  ${fg(theme.fgDim, formatEvent(e))}`);
-    }
-  };
-
-  try {
-    const result = await runWithV4(message, {
-      provider: config.provider,
-      model: config.model,
-      apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
-      workdir: config.workdir,
-      speculationBudgetMs: options.speculationBudgetMs ?? config.speculationBudgetMs,
-      qualityThreshold: options.qualityThreshold ?? config.qualityThreshold,
-      autonomous: options.autonomous ?? config.autonomous,
-      scope: options.scope ?? config.scope,
-      onEvent,
-    });
-
-    // Print final output
-    console.log("\n" + "─".repeat(60));
-    console.log(`${fg(theme.primary, '✧ v4.0 Output:')}\n${result.output}`);
-    console.log("─".repeat(60));
-    console.log(`${fg(theme.fgDim, '✧ Stats:')} ${result.totalMs}ms, ${result.totalTokens} tokens, ${result.events.length} events`);
-    if (result.plan) {
-      console.log(`${fg(theme.fgDim, '✧ Plan:')} ${result.plan.subgoals?.length ?? 0} subgoals, methods: ${result.plan.methodsUsed?.join(", ") ?? "none"}`);
-    }
-  } catch (err: any) {
-    console.error(`${mascots.sleepHua} ${fg(theme.danger, 'v4.0 engine error: ' + err.message)}`);
-  }
-}
-
 async function startAgent(message: string | undefined, options: any, fullArgs: string[] = []): Promise<void> {
   // Load config (for first-run detection)
   let config = loadConfig();
@@ -421,21 +321,12 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
   if (options.baseUrl) config.baseUrl = options.baseUrl;
   if (options.dir) config.workdir = options.dir;
   if (options.permissionMode) config.permissionMode = options.permissionMode;
-  if (options.engine) config.engine = options.engine;
-  if (options.qualityThreshold !== undefined) config.qualityThreshold = options.qualityThreshold;
-  if (options.speculationBudgetMs !== undefined) config.speculationBudgetMs = options.speculationBudgetMs;
   // ── Autoresearch-inspired flags ────────────────────────────
   if (options.autonomous !== undefined) config.autonomous = options.autonomous;
   if (options.scope !== undefined) config.scope = options.scope;
   // Populate known providers (used by /provider for the list)
   config.knownProviders = Object.keys(PROVIDERS).filter((k) => k !== 'custom');
   saveConfig(config);
-
-  // If v4 engine requested, route to v4 runner
-  if (config.engine === 'v4') {
-    await runV4Engine(message, config, options);
-    return;
-  }
 
   // Initialize components
   const store = new MemoryStore(MEMORY_PATH);
@@ -446,13 +337,15 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
 
   // Resolve provider - either from config or auto-detect from env
   const providerId = (config.provider as ProviderId) || detectProviderFromEnv()?.id || 'custom';
-  const apiKey = config.apiKey || process.env[PROVIDERS[providerId]?.apiKeyEnv || 'TOKENROUTER_API_KEY'] || '';
+  // Smart API key resolution: prefer config.apiKey if provider matches, else use provider's env var
+  const providerApiKeyEnv = PROVIDERS[providerId]?.apiKeyEnv || 'TOKENROUTER_API_KEY';
+  const apiKey = config.apiKey || process.env[providerApiKeyEnv] || '';
   const baseUrl = config.baseUrl || process.env.HUAGENT_BASE_URL;
 
   const client = new UnifiedClient(providerId, apiKey, baseUrl);
-  // Override model if specified
-  if (config.model && config.model !== client.getModel()) {
-    (client as any).provider.defaultModel = config.model;
+  // Override model via the proper setModel method (no global mutation)
+  if (config.model) {
+    client.setModel(config.model);
   }
 
   console.log(`${mascots.smallHua} ${fg(theme.success, 'Connected to ' + client.getProviderName() + '/' + (config.model || client.getModel()))}`);
@@ -505,12 +398,12 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
 
   // TUI mode
   if (options.tui !== false) {
-    const tuiMode = options.tui === 'legacy' || options.tui === 'classic' ? 'legacy' : 'modern';
+    const tuiMode = 'modern';
     const engine = new Engine(client, memory, tools, sessions, {
       onEvent: (event: any) => {},
     });
 
-    const AppComponent = tuiMode === 'legacy' ? App : ModernApp;
+    const AppComponent = ModernApp;
 
     // Wire the dialog controller so the TUI can pause the engine
     // for questions / permissions / plan reviews.

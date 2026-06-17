@@ -40,26 +40,30 @@ import type {
 // concrete types from their source modules. This avoids the `any` escape hatch
 // that hides bugs at the prop boundary.
 
-import type { LLMClient } from '../llm/client.js';
+import type { UnifiedClient } from '../providers/client.js';
 import type { ToolRegistry } from '../tools/index.js';
 import type { SessionManager } from '../sessions.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import type { PermissionMode } from '../permissions.js';
 
 interface ModernAppProps {
   engine: EngineLike;
-  client: LLMClient;
+  client: UnifiedClient;
   memory: MemoryManager;
   tools: ToolRegistry;
   sessions: SessionManager;
-  skills: Record<string, unknown>;
+  skills: any;
   config: ConfigLike;
   onSubmit: (message: string) => Promise<string>;
   onExit?: () => void;
 }
 
 // Re-exported for compatibility
-export type { LLMClient, ToolRegistry, SessionManager, MemoryManager, PermissionMode };
+export type { UnifiedClient, ToolRegistry, SessionManager, MemoryManager };
 
 export interface LLMStats {
   totalTokens?: number;
@@ -240,15 +244,15 @@ export const ModernApp: React.FC<ModernAppProps> = ({
       onSelect: (id: string) => {
         const p = PROVIDERS[id as ProviderId];
         if (!p) return;
-        // Read API key from env (or fall back to current baseUrl for custom)
-        const apiKey = process.env[p.apiKeyEnv] || '';
+        // Read API key: prefer env var, then config-stored key (from onboarding)
+        const apiKey = process.env[p.apiKeyEnv] || ((config as any).provider === p.id ? ((config as any).apiKey || '') : '');
         const baseUrl = process.env.HUAGENT_BASE_URL || config.baseUrl;
         if (p.id === 'custom' && !baseUrl) {
           pushToast('error', 'Custom provider requires HUAGENT_BASE_URL');
           setPicker(null);
           return;
         }
-        if (!apiKey && p.id !== 'custom') {
+        if (!apiKey && p.id !== 'custom' && p.id !== 'ollama') {
           pushToast('error', `No API key: set ${p.apiKeyEnv}`);
           setPicker(null);
           return;
@@ -314,13 +318,11 @@ export const ModernApp: React.FC<ModernAppProps> = ({
     }
     // Allow quick pick of common subdirs
     try {
-      const fs = require('node:fs') as typeof import('node:fs');
-      const path = require('node:path') as typeof import('node:path');
-      const entries = fs.readdirSync(cwd, { withFileTypes: true })
+      const entries = readdirSync(cwd, { withFileTypes: true })
         .filter((e: any) => !e.name.startsWith('.') && e.name !== 'node_modules')
         .slice(0, 12);
       for (const e of entries) {
-        const id = path.join(cwd, e.name);
+        const id = join(cwd, e.name);
         if (e.isDirectory()) {
           items.push({ id, label: e.name + '/', detail: 'dir' });
         } else if (/\.(ts|tsx|js|jsx|py|go|rs|md|json|yaml|yml)$/.test(e.name)) {
@@ -372,42 +374,76 @@ export const ModernApp: React.FC<ModernAppProps> = ({
 
   const closePicker = useCallback(() => setPicker(null), []);
 
+  // ── Shared SlashCommandContext builder (avoids duplicating ~20 lines) ──
+  const buildSlashCtx = useCallback((): SlashCommandContext => ({
+    messages: messagesRef.current as any,
+    llm: client,
+    memory,
+    tools,
+    sessions,
+    workdir: config.workdir,
+    config,
+    onToggleAutonomous: () => {
+      setAutonomous((a) => !a);
+      return !autonomousRef.current;
+    },
+    onSetScope: (s: string | undefined) => {
+      const next = s ?? null;
+      setScope(next);
+      return next;
+    },
+    onGetScope: () => scope,
+    onGetAutonomous: () => autonomous,
+    onGetEffort: () => (config as any).effort || 'medium',
+    onSetEffort: (e: string) => {
+      (config as any).effort = e;
+      pushToast('success', `Effort → ${e}`);
+    },
+    onSetPermissionMode: (mode: PermissionMode) => {
+      tools.setPermissionMode(mode);
+      setPermissionMode(mode);
+    },
+    onSwitchModel: (m: string) => {
+      (engine as any).setModel?.(m);
+      (config as any).model = m;
+      setCurrentModel(m);
+      pushToast('success', `Model → ${m}`);
+    },
+    onSwitchProvider: (p: string) => {
+      const prov = PROVIDERS[p as ProviderId];
+      if (!prov) return;
+      const apiKey = process.env[prov.apiKeyEnv] || ((config as any).provider === prov.id ? ((config as any).apiKey || '') : '');
+      if (!apiKey && prov.id !== 'custom' && prov.id !== 'ollama') {
+        pushToast('error', `No API key: set ${prov.apiKeyEnv}`);
+        return;
+      }
+      const baseUrl = process.env.HUAGENT_BASE_URL || config.baseUrl;
+      (engine as any).setProvider?.(prov.id, apiKey, baseUrl);
+      (config as any).provider = prov.id;
+      setCurrentProvider(prov.id);
+      pushToast('success', `Provider → ${prov.displayName}`);
+    },
+    onPersistConfig: () => {
+      try {
+        const dir = join(homedir(), '.huagent');
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'config.json'), JSON.stringify(config, null, 2));
+      } catch {}
+    },
+    onClear: () => setMessages([]),
+    onOpenProviderPicker: openProviderPicker,
+    onOpenModelPicker: openModelPicker,
+    onOpenScopePicker: openScopePicker,
+    onOpenPermissionPicker: openPermissionPicker,
+    onShowSessionResume: openSessionResume,
+  }), [config, tools, memory, sessions, client, engine, scope, autonomous, pushToast, openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, openSessionResume]);
+
   // ── Slash command handler ────────────────────────────────────
   const handleSlashCommand = useCallback(async (text: string) => {
     const parts = text.slice(1).split(/\s+/);
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1);
-    const ctx: SlashCommandContext = {
-      messages: messagesRef.current as any,
-      llm: client,
-      memory,
-      tools,
-      sessions,
-      workdir: config.workdir,
-      config,
-      onToggleAutonomous: () => {
-        setAutonomous((a) => !a);
-        return !autonomousRef.current;
-      },
-      onSetScope: (s: string | undefined) => {
-        const next = s ?? null;
-        setScope(next);
-        return next;
-      },
-      onGetScope: () => scope,
-      onGetAutonomous: () => autonomous,
-      onSetPermissionMode: (mode: PermissionMode) => {
-        tools.setPermissionMode(mode);
-        setPermissionMode(mode);
-      },
-      onClear: () => setMessages([]),
-      // Picker openers — wire to React state
-      onOpenProviderPicker: openProviderPicker,
-      onOpenModelPicker: openModelPicker,
-      onOpenScopePicker: openScopePicker,
-      onOpenPermissionPicker: openPermissionPicker,
-      onShowSessionResume: openSessionResume,
-    };
+    const ctx = buildSlashCtx();
     const result = await executeSlashCommand(cmd, args, ctx);
     if (result.message) {
       pushToast(result.clearMessages ? 'info' : 'success', result.message);
@@ -419,7 +455,7 @@ export const ModernApp: React.FC<ModernAppProps> = ({
     // Always clear input after slash command (the picker is the new UX, or the toast confirms)
     setInput('');
     setSuggestions([]);
-  }, [config, tools, memory, sessions, onExit, exit, pushToast, scope, autonomous, openProviderPicker, openModelPicker, openScopePicker, openPermissionPicker, openSessionResume]);
+  }, [buildSlashCtx, onExit, exit, pushToast]);
 
   // ── Command palette: lets the user pick any slash action via Ctrl+K ──
   const openCommandPalette = useCallback(() => {
@@ -618,78 +654,10 @@ export const ModernApp: React.FC<ModernAppProps> = ({
         showActivity={showActivity}
         stats={stats}
         toasts={toasts}
-        engine="v3"
+        engine={(config as any).engine || 'v3'}
         onSubmit={handleSubmit}
         onExecuteSlash={async (cmd: string, args: string[]) => {
-          const ctx: SlashCommandContext = {
-            messages: messagesRef.current as any,
-            llm: client,
-            memory,
-            tools,
-            sessions,
-            workdir: config.workdir,
-            config,
-            onToggleAutonomous: () => {
-              setAutonomous((a) => !a);
-              return !autonomousRef.current;
-            },
-            onSetScope: (s: string | undefined) => {
-              const next = s ?? null;
-              setScope(next);
-              return next;
-            },
-            onGetScope: () => scope,
-            onGetAutonomous: () => autonomous,
-            onGetEffort: () => (config as any).effort || 'medium',
-            onSetEffort: (e: string) => {
-              (config as any).effort = e;
-              pushToast('success', `Effort → ${e}`);
-            },
-            onShowSessionResume: openSessionResume,
-            onSetPermissionMode: (mode: PermissionMode) => {
-              tools.setPermissionMode(mode);
-              setPermissionMode(mode);
-            },
-            onSwitchModel: (m: string) => {
-              (engine as any).setModel?.(m);
-              (config as any).model = m;
-              setCurrentModel(m);
-              pushToast('success', `Model → ${m}`);
-            },
-            onSwitchProvider: (p: string) => {
-              const prov = PROVIDERS[p as ProviderId];
-              if (!prov) return;
-              const apiKey = process.env[prov.apiKeyEnv] || '';
-              if (!apiKey && prov.id !== 'custom') {
-                pushToast('error', `No API key: set ${prov.apiKeyEnv}`);
-                return;
-              }
-              const baseUrl = process.env.HUAGENT_BASE_URL || config.baseUrl;
-              (engine as any).setProvider?.(prov.id, apiKey, baseUrl);
-              (config as any).provider = prov.id;
-              setCurrentProvider(prov.id);
-              pushToast('success', `Provider → ${prov.displayName}`);
-            },
-            onPersistConfig: () => {
-              try {
-                const path = require('node:path');
-                const fs = require('node:fs');
-                const os = require('node:os');
-                const dir = path.join(os.homedir(), '.huagent');
-                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(
-                  path.join(dir, 'config.json'),
-                  JSON.stringify(config, null, 2),
-                );
-              } catch {}
-            },
-            onClear: () => setMessages([]),
-            // Picker openers — wire to React state
-            onOpenProviderPicker: openProviderPicker,
-            onOpenModelPicker: openModelPicker,
-            onOpenScopePicker: openScopePicker,
-            onOpenPermissionPicker: openPermissionPicker,
-          };
+          const ctx = buildSlashCtx();
           const result = await executeSlashCommand(cmd, args, ctx);
           if (result.message) pushToast(result.clearMessages ? 'info' : 'success', result.message);
           if (result.exit) { onExit?.(); exit(); }

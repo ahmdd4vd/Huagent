@@ -305,7 +305,7 @@ export const NewLayout: React.FC<NewLayoutProps> = ({
     }
   });
 
-  const projectName = config?.workdir?.split('/').filter(Boolean).pop() || undefined;
+  const projectName = config?.workdir?.split(/[/\\]/).filter(Boolean).pop() || undefined;
   const contentWidth = Math.max(40, width);
   const activityWidth = showActivity ? Math.min(60, Math.max(30, Math.floor(contentWidth * 0.4))) : 0;
   const messageWidth = contentWidth - activityWidth - (showActivity ? 2 : 0);

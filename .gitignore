@@ -59,5 +59,8 @@ workdir/
 # Snapshots
 *.snap.local
 
+# Reference directories
+9router/
+
 # npm auth (contains publish token — never commit)
 .npmrc

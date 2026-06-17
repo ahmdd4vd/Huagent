@@ -6,12 +6,18 @@ import { sep } from 'node:path';
 export function lexicallyNormalize(p: string): string {
   if (!p) return '';
 
-  const isAbsolute = p.startsWith('/') || /^[a-zA-Z]:[\\\/]/.test(p);
-  const parts = p.split(/[\\\/]/).filter(Boolean);
+  // Detect Windows drive letter (e.g. C:\ or C:/)
+  const driveMatch = p.match(/^([a-zA-Z]:)[\\/]/);
+  const drivePrefix = driveMatch ? driveMatch[1] : '';
+
+  const isAbs = p.startsWith('/') || !!driveMatch;
+  const parts = p.split(/[\\/]/).filter(Boolean);
   const result: string[] = [];
 
   for (const part of parts) {
     if (part === '.') continue;
+    // Skip the drive letter as a part (e.g. "C:")
+    if (drivePrefix && part === drivePrefix) continue;
     if (part === '..') {
       result.pop();
       continue;
@@ -20,7 +26,10 @@ export function lexicallyNormalize(p: string): string {
   }
 
   const normalized = result.join(sep);
-  return isAbsolute ? sep + normalized : normalized;
+  if (drivePrefix) {
+    return drivePrefix + sep + normalized;
+  }
+  return isAbs ? sep + normalized : normalized;
 }
 
 export function isWithinWorkspace(path: string, workspaceRoot: string): boolean {

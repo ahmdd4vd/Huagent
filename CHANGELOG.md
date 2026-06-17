@@ -5,6 +5,71 @@ All notable changes to Huagent are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.0] - 2026-06-15 — "Production-Ready"
+
+> **WllmConcept fully integrated, TUI polished, UX production-ready.** 4 major phases of improvements shipped.
+
+### ✨ Added
+
+#### WllmConcept Integration (Phase 1-2)
+- **5-Memory System** — semantic, episodic, structural, causal, meta memory with intent-based routing
+- **WikiStore** — bi-temporal property graph with confidence lifecycle (VERIFIED → INFERRED → ASSUMED → CONTRADICTED → RESOLVED)
+- **WikiMemory wrapper** — backward-compatible API layer bridging MemoryManager to WikiStore
+- **Scheduled Lint** — periodic wiki quality audit with 7 checks (title, confidence, freshness, backlinks, tags, body, conflicts) and A-F grading
+- **Evolve on Session End** — automatic self-reflection finding contradictions, suggesting new pages, refreshing stale knowledge
+- **Auto-Ingest** — file watcher (chokidar) that automatically extracts entities, concepts, and creates/updates wiki pages
+- **Content Analyzer** — extracts functions, classes, interfaces, patterns, algorithms, data structures, relationships from code
+- **Bilingual intent detection** — supports English + Indonesian keywords ("what is", "apa itu", "how to", "gimana")
+- **Comprehensive test suite** — 26 test cases for WllmConcept integration
+- **Documentation** — WLLMCONCEPT_GUIDE.md (813 lines), AUTO_INGEST_GUIDE.md (769 lines)
+
+#### TUI Polish (Phase 3)
+- **Syntax Highlighting** — code blocks with cli-highlight, auto-detect language (TypeScript, JavaScript, Python, Rust, Go, Bash, JSON), line numbers, theme-aware colors
+- **Diff View** — line-by-line diff with diff library, color-coded (green +, red -, gray context), line numbers (before/after), context lines
+- **File Tree** — tree view with icons (📁/📄), file metadata (size, lines), color-coded by type, expandable/collapsible, git status integration
+- **Progress Indicators** — visual progress bar, percentage, step count (current/total), ETA calculation, elapsed time, token count + cost, status message
+- **Comprehensive test suite** — 40+ test cases for TUI polish components
+- **Documentation** — PHASE3_TUI_POLISH_GUIDE.md (769 lines)
+
+#### UX Polish (Phase 4)
+- **Better Error Messages** — error classification (permission, file-not-found, syntax, network, API, config, timeout), actionable suggestions, interactive action picker, documentation links
+- **Smart Autocomplete** — fuzzy matching with Fuse.js, context-aware (commands vs files vs variables), recent history prioritization, visual picker (arrow keys + Enter), rich descriptions
+- **Clickable File Paths** — terminal hyperlinks (OSC 8), auto-open in editor, line number highlighting, syntax highlighting on open, file type detection, icons for file types
+- **Enhanced Loading States** — visual progress bar, current step description, file/step count, time tracking + ETA, action buttons (Cancel, Details, Background), cancellable operations, success completion message
+- **Comprehensive test suite** — 40+ test cases for UX polish components
+- **Documentation** — PHASE4_UX_POLISH_GUIDE.md (706 lines)
+
+### 📦 Dependencies Added
+- `cli-highlight` ^2.1.11 — syntax highlighting for code blocks
+- `diff` ^9.0.0 + `@types/diff` ^7.0.2 — line-by-line diff view
+- `chokidar` ^5.0.0 + `@types/chokidar` ^1.7.5 — file watching for auto-ingest
+- `fuse.js` ^7.4.2 — fuzzy matching for smart autocomplete
+- `terminal-link` ^5.0.0 — clickable file paths in terminal
+- `chalk` ^5.6.2 — terminal string styling
+
+### 📚 Documentation
+- **USER_GUIDE.md** — comprehensive user guide (797 lines)
+- **ARCHITECTURE.md** — system architecture and design (671 lines)
+- **CONTRIBUTING.md** — contributor guide (725 lines)
+- **API_REFERENCE.md** — full API documentation (1097 lines)
+- **WLLMCONCEPT_GUIDE.md** — wiki knowledge engine guide (813 lines)
+- **AUTO_INGEST_GUIDE.md** — file watcher + content analysis guide (769 lines)
+- **PHASE3_TUI_POLISH_GUIDE.md** — syntax highlighting, diff view, file tree guide (769 lines)
+- **PHASE4_UX_POLISH_GUIDE.md** — error messages, autocomplete, loading states guide (706 lines)
+- **Total: 5,647 lines of documentation**
+
+### 📊 Stats
+- Tests: 900+ passing (was 870+)
+- Source files: 115+ TS/TSX (was 105+)
+- Providers: 22 (unchanged)
+- Models: 101 (unchanged)
+- Slash commands: 26 (unchanged)
+- Lines of code: 22k+ (was 18k+)
+- New TUI components: 8 (syntax-highlighter, diff-view, file-tree, progress-indicator, error-handler, smart-autocomplete, clickable-files, loading-states)
+- New WllmConcept modules: 6 (wiki-memory, scheduler, content-analyzer, auto-ingest, + integration)
+
+---
+
 ## [4.0.0] - 2026-06-15 — Huagent v4.0
 
 > Rebrand: **Huagent by Huanime**. AI coding agent CLI. Tightened visuals — no lebay emoji, modern palette, professional tone throughout.
@@ -93,7 +158,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[4.0.0]: https://github.com/d4vdxm/huagent/releases/tag/v4.0.0
-[3.0.0]: https://github.com/d4vdxm/huagent/releases/tag/v3.0.0
-[2.0.0]: https://github.com/d4vdxm/huagent/releases/tag/v2.0.0
-[1.0.0]: https://github.com/d4vdxm/huagent/releases/tag/v1.0.0
+[5.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v5.0.0
+[4.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v4.0.0
+[3.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v3.0.0
+[2.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v2.0.0
+[1.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v1.0.0

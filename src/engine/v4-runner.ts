@@ -52,6 +52,7 @@ export interface V4RunOptions {
 
 /**
  * Adapter: UnifiedClient → LLMProvider for v4.
+ * Tracks actual token usage from stream events.
  */
 function clientToProvider(
   client: UnifiedClient,
@@ -63,6 +64,7 @@ function clientToProvider(
     generateText: async (prompt, opts) => {
       const t0 = Date.now();
       let text = "";
+      let tokensUsed = 0;
       for await (const event of client.stream({
         model,
         system: "You are a coding assistant. Respond in the requested format. Be concise.",
@@ -71,11 +73,17 @@ function clientToProvider(
       })) {
         if (event.type === "text_delta") {
           text += event.delta;
+        } else if (event.type === "usage") {
+          tokensUsed = event.total;
         } else if (event.type === "message_stop") {
           break;
         }
       }
-      return { text, tokensUsed: 0, durationMs: Date.now() - t0 };
+      // Fallback: estimate tokens if usage event wasn't emitted
+      if (tokensUsed === 0) {
+        tokensUsed = Math.ceil((text.length + prompt.length) / 4);
+      }
+      return { text, tokensUsed, durationMs: Date.now() - t0 };
     },
   };
 }

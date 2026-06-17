@@ -158,8 +158,8 @@ export class HookSystem {
     });
 
     this.register('PostToolUse', (ctx) => {
-      if (ctx.data.error) {
-        this.emit('Error', { source: 'tool', name: ctx.data.name, error: ctx.data.error });
+      if (ctx.data.error && !ctx.data._fromHook) {
+        this.emit('Error', { source: 'tool', name: ctx.data.name, error: ctx.data.error, _fromHook: true });
       }
     });
 

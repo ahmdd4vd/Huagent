@@ -11,7 +11,7 @@ import { mascots } from './tui/mascot.js';
 import { SessionManager } from './sessions.js';
 import { MemoryManager } from './memory/manager.js';
 import { ToolRegistry } from './tools/index.js';
-import { LLMClient } from './llm/client.js';
+
 import { summarizeConversation } from './summary.js';
 import type { Message } from './types/index.js';
 import { classifyBashCommand, describeIntent } from './permissions.js';
@@ -163,7 +163,7 @@ export async function executeSlashCommand(
       return await cmdDiff(ctx);
     case 'effort':
     case 'e':
-      return cmdEffort(args, ctx);
+      return await cmdEffort(args, ctx);
     case 'version':
     case 'v':
       return cmdVersion([], ctx);
@@ -805,7 +805,8 @@ async function cmdDiff(ctx: SlashCommandContext): Promise<SlashCommandResult> {
 }
 
 function cmdVersion(_args: string[], ctx: SlashCommandContext): SlashCommandResult {
-  const v = (ctx.config && ctx.config.version) || '4.0.0';
+  // Read version from the config (set by cli.tsx) or fall back to env
+  const v = (ctx.config && ctx.config.version) || process.env.npm_package_version || '4.3.1';
   return { handled: true, message: `${mascots.smallHua} ${fg(theme.primary, 'huagent v' + v)}` };
 }
 
@@ -815,7 +816,7 @@ function cmdVersion(_args: string[], ctx: SlashCommandContext): SlashCommandResu
  *        /effort <tier>    set tier (low/medium/high/xhigh/max/ultramax)
  *        /effort auto      auto-detect from last user message
  */
-function cmdEffort(args: string[], ctx: SlashCommandContext): SlashCommandResult {
+async function cmdEffort(args: string[], ctx: SlashCommandContext): Promise<SlashCommandResult> {
   const current = ctx.onGetEffort ? ctx.onGetEffort() : (ctx.config.effort as string | undefined) || 'medium';
   const VALID = ['low', 'medium', 'high', 'xhigh', 'max', 'ultramax'];
 
@@ -846,7 +847,7 @@ function cmdEffort(args: string[], ctx: SlashCommandContext): SlashCommandResult
     // Auto-detect from last user message
     const lastUser = [...ctx.messages].reverse().find((m) => m.role === 'user');
     const text = (lastUser?.content as string) || '';
-    const { detectEffort } = require('../onboarding/effort-detector.js');
+    const { detectEffort } = await import('./onboarding/effort-detector.js');
     const detected = detectEffort(text);
     if (ctx.onSetEffort) ctx.onSetEffort(detected);
     return { handled: true, message: `${mascots.smallHua} ${fg(theme.success, '✓ Effort auto-detected: ' + detected)}` };

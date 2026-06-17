@@ -1,210 +1,674 @@
-# huagent architecture
+# Huagent Architecture
 
-> A high-level map of the huagent v4.0.0 codebase. If you're new here, start
-> with `src/cli.tsx` (entry point) and follow the imports.
-
-## Bird's eye view
-
-```
-                    ┌──────────────────────────────────┐
-                    │           bin/huagent.js         │  ← shebang, runs dist/
-                    └──────────────┬───────────────────┘
-                                   │
-                    ┌──────────────▼───────────────────┐
-                    │            src/cli.tsx           │  ← arg parsing, bootstrap
-                    └──────────────┬───────────────────┘
-                                   │
-              ┌────────────────────┼────────────────────┐
-              │                    │                    │
-    ┌─────────▼──────┐   ┌─────────▼──────┐   ┌─────────▼──────┐
-    │   tui/         │   │  engine/        │   │  providers/    │
-    │  ModernApp    │   │  v4-runner     │   │  registry      │
-    │  new-layout   │   │  v4/actor      │   │  models        │
-    │  status       │   │  v4/critic     │   │  client        │
-    │  activity-*   │   │  v4/speculative│   │                │
-    └────────────────┘   └────────┬───────┘   └────────────────┘
-                                  │
-                ┌─────────────────┼─────────────────┐
-                │                 │                 │
-        ┌───────▼──────┐  ┌───────▼──────┐  ┌───────▼──────┐
-        │   tools/     │  │  memory/      │  │  wllm/        │
-        │  bash, file, │  │  SQLite       │  │  wiki engine  │
-        │  edit, read  │  │  facts, skills│  │  graph, evolve│
-        └──────────────┘  └──────────────┘  └──────────────┘
-```
-
-## Core subsystems
-
-### 1. CLI entry & argument parsing (`src/cli.tsx`)
-
-- Parses flags (`--provider`, `--model`, `--api-key`, `--base-url`, `--perm`, `--tui`, `--engine`, etc.)
-- Detects provider from env vars (22 supported, see `src/providers/registry.ts`)
-- Loads config from disk (`~/.huagent/config.json`)
-- Boots the TUI (modern) or runs one-shot (no-tui)
-- Wires the engine + LLM client + tools
-
-### 2. Providers (`src/providers/`)
-
-The provider subsystem has two parts:
-
-#### `registry.ts` — provider config
-
-22 providers, each with:
-- `baseUrl`, `apiKeyEnv`, `defaultModel`
-- `apiFormat` (anthropic | openai-chat | openai-responses | gemini)
-- `authScheme` (bearer | x-api-key | custom)
-- Capability flags (`supportsTools`, `supportsStreaming`, `supportsPromptCaching`, `contextWindow`)
-
-`detectProviderFromEnv()` walks 22 env vars in priority order and returns the first match.
-
-#### `models.ts` — model registry
-
-101 hardcoded models with:
-- `id, label, family, context, output, cost, capabilities, tier, notes`
-- Tier classification: `flagship | fast | reasoning | code | local | legacy`
-- Capability flags: `toolCall, vision, reasoning, streaming, json`
-- Pricing: per-1M-tokens USD
-
-`getModelCost()` resolves any model id to its pricing (with provider-level fallback for unknown models).
-
-#### `client.ts` — unified streaming client
-
-`UnifiedClient` is the single LLM interface used by the engine. It:
-- Auto-routes to Anthropic or OpenAI-compat streaming based on `provider.apiFormat`
-- Emits `StreamEvent` discriminated union: `thinking | text_delta | tool_use | usage | message_stop | error`
-- **Accumulates OpenAI tool_calls** across chunks (OpenAI sends fragments; we buffer)
-- **Falls back** to a ~4-chars/token heuristic when streaming usage is missing
-- **Recovers from `stream_options` rejections** (some providers reject it)
-- Tracks per-session stats: `requests, totalRequests, inputTokens, outputTokens, totalInputTokens, totalOutputTokens, cost, totalCost`
-
-### 3. TUI (`src/tui/`)
-
-Modern React/Ink-based terminal UI. Width-adaptive (40–240+ cols).
-
-```
-tui/
-├── theme.ts            # sakura/lavender/gold palette, no emoji
-├── ModernApp.tsx       # adapter that wires NewLayout into the engine
-├── new-layout.tsx      # orchestrator: header + activity feed + subagent panel + toasts + status bar + prompt
-├── compact-header.tsx  # 3-line header (wordmark, chips, separator)
-├── activity-store.ts   # singleton ring-buffer of activities (200 cap) + subagent tracking (32 cap)
-├── activity-feed.tsx   # live stream of activities
-├── activities.tsx      # 6 card components: Read, Write, Edit, Bash, Subagent, Verify
-├── status.tsx          # ModeChips, SubagentPanel, StatusBar, Toasts
-└── ...
-```
-
-Width adaptation: `CompactHeader` truncates chips at narrow widths; `StatusBar` uses a single `<Text>` with calculated left/right positions; `ModeChips` drops low-priority chips below 100 cols.
-
-### 4. Engine v4 (`src/engine/v4/`)
-
-Stream-native actor model with:
-
-```
-v4/
-├── engine-v4.ts        # top-level orchestrator
-├── actor/              # message-passing between actors
-├── critic/             # 3-critic mesh for code review
-├── speculative/        # race N candidate strategies, pick winner
-├── capability/         # dynamic capability building
-├── graph/              # graph of dependencies between tasks
-├── discipline/         # 5-beat cycle: Plan → Ground → Observe → Diagnose → Verify
-├── stream/             # streaming pipeline + cognitive events
-└── ...
-```
-
-The discipline layer is the safety net: every task goes through 5 beats, and any failure triggers a retry with more context. No silent failures.
-
-### 5. Tools (`src/tools/`)
-
-- `bash` — execute shell commands (with permission classifier)
-- `read` — read files
-- `edit` — patch files
-- `write` — create/overwrite files
-- `search` — grep across the workspace
-- `git` — diff, status, commit
-
-Each tool has a `risk` classification (low/medium/high/critical) that feeds the permission system.
-
-### 6. Memory (`src/memory/`)
-
-SQLite-backed persistent memory. Stores:
-- **Memories** — key facts about the user/project
-- **Skills** — learned procedures (auto-loaded by name)
-- **Sessions** — saved conversation history
-- **Wllm wiki** — bundle import/export
-
-### 7. WllmConcept (`src/wllm/`)
-
-Wiki knowledge engine:
-- `ingest/` — parse markdown, extract semantic + structural data
-- `graph/` — store the wiki as a queryable graph
-- `query/` — full-text + graph search
-- `evolve/` — improve the wiki via lint cycles
-- `lint/` — check for stale/redundant content
-- `provenance/` — track origin of every fact
-- `bundle/` — package wikis for distribution
-- `sync/` — round-trip markdown ↔ graph
-
-### 8. Slash commands (`src/slash-commands.ts`)
-
-26 commands. Each is a function that takes `(args, ctx)` and returns a `SlashCommandResult`. The dispatcher is a single `switch` statement in `executeSlashCommand()`. Adding a new command is:
-1. Add to `SLASH_COMMANDS` array
-2. Add a `case` in the switch
-3. Implement the function
-4. Add tests in `tests/cli-commands.test.ts`
-5. Update README
-
-## Permissions (`src/permissions.ts`)
-
-5 modes:
-- `read-only` — no writes, no bash
-- `workspace-write` — edit project files only
-- `sandboxed` — edits go to a temp dir
-- `danger-full-access` — no confirmations
-- `custom` — user-defined ruleset
-
-Each bash command is classified via `classifyBashCommand()` (e.g. `rm -rf /` → critical). Critical commands always ask for confirmation.
-
-## Sessions (`src/sessions.ts`)
-
-Save/load conversation state to disk. JSON format. Saved on `/exit`, `/save`, or `--exit-after`. Loaded with `/resume <id>`.
-
-## Testing
-
-5 test suites, all runnable via `npm test` (vitest wrapper):
-
-| Suite | Tests | What it covers |
-|-------|-------|----------------|
-| `tests/tui-v4.test.ts` | 119 | theme tokens, activity-store, status, activity-feed, slash commands |
-| `tests/discipline.test.ts` | 181 | Plan/Ground/Observe/Diagnose/Verify cycle |
-| `tests/cli-commands.test.ts` | 68 | parseOptions, /provider, /model, /scope, /autonomous, /models, /providers |
-| `tests/test-tui-stress.ts` | 153 | visual regression at 40-240 cols, 1000+ activities, unicode |
-| `tests/test-providers.ts` | 350 | 22-provider integrity, 101-model pricing/capabilities, auto-detect |
-
-Total: **870+ tests, 0 failures**.
-
-## Design principles
-
-1. **Honest errors** — every failure path emits a meaningful event. No silent crashes.
-2. **Width-adaptive UI** — works at 40 cols and 240+ cols without re-layout.
-3. **Type safety** — strict TypeScript everywhere, no `any` in public APIs.
-4. **Zero-config** — set an env var, it works. No mandatory setup wizard.
-5. **Boring infrastructure** — SQLite for memory, JSON for sessions, no exotic deps.
-6. **Multi-provider from day one** — Anthropic-format vs OpenAI-compat is the only split.
-
-## Where to look next
-
-- `src/cli.tsx` — entry point
-- `src/providers/registry.ts` — provider config
-- `src/providers/models.ts` — model registry
-- `src/providers/client.ts` — streaming client
-- `src/tui/new-layout.tsx` — TUI orchestrator
-- `src/engine/v4/engine-v4.ts` — engine entry
-- `src/slash-commands.ts` — 26 commands
-- `install.sh` — one-liner installer
-- `.github/workflows/ci.yml` — CI matrix
+**Version:** 4.3.1  
+**Last Updated:** 2026-06-15
 
 ---
 
-— © 2026 huanime
+## Overview
+
+Huagent is a **terminal-native AI coding agent** with a unified 6-stage workflow engine, multi-provider LLM support, and intelligent memory system.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        HUAGENT                              │
+│                                                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│  │   TUI    │  │  Engine  │  │ Providers│  │  Memory  │  │
+│  │ (Ink+    │  │ (6-stage │  │ (26 LLM  │  │ (SQLite  │  │
+│  │  React)  │  │ workflow)│  │  APIs)   │  │ + Wiki)  │  │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
+│       │              │              │              │        │
+│       └──────────────┴──────────────┴──────────────┘        │
+│                           │                                 │
+│                    ┌──────┴──────┐                          │
+│                    │    Tools    │                          │
+│                    │ (8 built-in)│                          │
+│                    └─────────────┘                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Core Components
+
+### 1. Engine (`src/engine/core.ts`)
+
+The **6-stage workflow engine** that processes user messages:
+
+```
+User Message
+    ↓
+┌─────────────────────────────────────────┐
+│ 1. UNDERSTAND                           │
+│    - Task classification (regex + LLM) │
+│    - Complexity detection               │
+│    - Memory recall                      │
+└──────────────┬──────────────────────────┘
+               ↓
+┌─────────────────────────────────────────┐
+│ 2. PLAN                                 │
+│    - Generate step-by-step plan         │
+│    - Identify tools needed              │
+│    - Set dependencies                   │
+└──────────────┬──────────────────────────┘
+               ↓
+┌─────────────────────────────────────────┐
+│ 3. EXECUTE                              │
+│    - Run steps (sequential/parallel)    │
+│    - Execute tools                      │
+│    - Feed results back to LLM           │
+└──────────────┬──────────────────────────┘
+               ↓
+┌─────────────────────────────────────────┐
+│ 4. VERIFY                               │
+│    - Critic scores (1-5 scale)          │
+│    - Check correctness/completeness     │
+│    - Verdict: pass/refine/fail          │
+└──────────────┬──────────────────────────┘
+               ↓
+┌─────────────────────────────────────────┐
+│ 5. REFINE                               │
+│    - If verdict=refine, re-execute      │
+│    - Max 3 iterations                   │
+└──────────────┬──────────────────────────┘
+               ↓
+┌─────────────────────────────────────────┐
+│ 6. REFLECT                              │
+│    - Extract lessons                    │
+│    - Save patterns to memory            │
+└──────────────┬──────────────────────────┘
+               ↓
+         Response
+```
+
+#### Key Classes
+
+- **`Engine`** — Main orchestrator
+- **`Planner`** — Generates plans via LLM
+- **`Critic`** — Scores results (5 dimensions)
+- **`Reflector`** — Extracts lessons learned
+
+#### Task Classification
+
+Two-tier classification:
+
+1. **Regex (fast path)**
+   ```typescript
+   "fix bug" → code_fix
+   "read file" → code_read
+   "refactor" → code_refactor
+   "run tests" → action
+   "what is" → question
+   ```
+
+2. **LLM fallback (for ambiguous messages)**
+   ```typescript
+   "hello there" → LLM classifier → code_write
+   ```
+
+#### Complexity Detection
+
+```typescript
+trivial  — short questions (< 30 chars)
+simple   — short messages (< 8 words)
+moderate — medium messages (8-25 words)
+complex  — long messages (> 25 words)
+```
+
+**Trivial tasks skip planning** and go straight to chat.
+
+---
+
+### 2. Providers (`src/providers/`)
+
+**26 LLM providers** with unified interface:
+
+```
+┌─────────────────────────────────────────┐
+│         UnifiedClient                   │
+│  - Unified API for all providers       │
+│  - Automatic retry (3 attempts)        │
+│  - Token/cost tracking                 │
+│  - Tool-call accumulation              │
+└──────────────┬──────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│Anthropic│          │OpenAI    │
+│(Claude) │          │(GPT)     │
+└──────────┘          └──────────┘
+    │                     │
+    └──────────┬──────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│Gemini  │          │Ollama    │
+│        │          │(local)   │
+└──────────┘          └──────────┘
+               │
+          (22 more...)
+```
+
+#### Provider Registry
+
+```typescript
+// src/providers/registry.ts
+PROVIDERS = {
+  anthropic: { baseUrl: '...', apiKeyEnv: 'ANTHROPIC_API_KEY', ... },
+  openai: { baseUrl: '...', apiKeyEnv: 'OPENAI_API_KEY', ... },
+  gemini: { baseUrl: '...', apiKeyEnv: 'GEMINI_API_KEY', ... },
+  // ... 23 more
+}
+```
+
+#### Supported Providers
+
+| Category | Providers |
+|----------|-----------|
+| API-Based | Anthropic, OpenAI, Gemini, Mistral, Groq, DeepSeek, Perplexity, xAI, MiniMax, NVIDIA, Cerebras, OpenRouter, Together, Fireworks, HuggingFace |
+| Cloud | GitHub Copilot, Azure OpenAI, AWS Bedrock, Google Vertex |
+| Local | Ollama |
+| Custom | Any OpenAI-compatible API |
+
+---
+
+### 3. Memory System (`src/memory/`)
+
+**4 types of memory** stored in SQLite:
+
+```
+┌─────────────────────────────────────────┐
+│         MemoryManager                   │
+└──────────────┬──────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│Episodic│          │Semantic  │
+│(events)│          │(facts)   │
+└──────────┘          └──────────┘
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│Procedur│          │Project   │
+│(how-to)│          │(facts)   │
+└──────────┘          └──────────┘
+```
+
+#### Memory Types
+
+| Type | Example | Use Case |
+|------|---------|----------|
+| **Episodic** | "Fixed login bug yesterday" | Past events |
+| **Semantic** | "React is a UI framework" | World knowledge |
+| **Procedural** | "How to fix login bugs" | How-to guides |
+| **Project** | "Project uses TypeScript" | Project facts |
+
+#### Memory Recall
+
+When searching for memories, Huagent uses:
+
+```typescript
+score = importance * 0.6 + recency * 0.4
+
+where:
+  importance = 0.0 - 1.0 (how critical)
+  recency = exponential decay (24h half-life)
+```
+
+#### SQLite Schema
+
+```sql
+-- Memories table
+CREATE TABLE memories (
+  id TEXT PRIMARY KEY,
+  type TEXT,           -- episodic/semantic/procedural/project
+  content TEXT,
+  metadata JSON,
+  importance REAL,     -- 0.0 - 1.0
+  last_accessed INTEGER,
+  created_at INTEGER
+);
+
+-- Project facts table
+CREATE TABLE project_facts (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at INTEGER
+);
+
+-- Skills table
+CREATE TABLE skills (
+  name TEXT PRIMARY KEY,
+  pattern TEXT,
+  created_at INTEGER
+);
+```
+
+---
+
+### 4. Tools (`src/tools/`)
+
+**8 built-in tools** the agent can use:
+
+```
+┌─────────────────────────────────────────┐
+│           ToolRegistry                  │
+└──────────────┬──────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│  read  │          │  write   │
+│(file)  │          │(file)    │
+└──────────┘          └──────────┘
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│  edit  │          │  bash    │
+│(file)  │          │(command) │
+└──────────┘          └──────────┘
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│ search │          │  grep    │
+│(files) │          │(content) │
+└──────────┘          └──────────┘
+    │                     │
+┌───┴────┐          ┌────┴─────┐
+│  web   │          │  memory  │
+│(fetch) │          │(save/load)│
+└──────────┘          └──────────┘
+```
+
+#### Tool Descriptions
+
+| Tool | Description | Example |
+|------|-------------|---------|
+| **read** | Read a file | `read("src/auth.ts")` |
+| **write** | Write a file | `write("src/new.ts", "content")` |
+| **edit** | Edit a file (search/replace) | `edit("src/auth.ts", "old", "new")` |
+| **bash** | Run bash command | `bash("npm test")` |
+| **search** | Search files by name | `search("*.test.ts")` |
+| **grep** | Search file contents | `grep("TODO", "src/")` |
+| **web** | Fetch web content | `web("https://example.com")` |
+| **memory** | Save/load memories | `memory.save("fact")` |
+
+#### Permission Modes
+
+Tools respect permission modes:
+
+```typescript
+type PermissionMode = 
+  | 'read-only'          // Only read files
+  | 'workspace-write'    // Read + write in workspace (default)
+  | 'danger-full-access' // Full access (⚠️ dangerous)
+  | 'prompt'             // Ask before each action
+  | 'allow'              // Allow everything
+```
+
+---
+
+### 5. TUI (`src/tui/`)
+
+**Terminal User Interface** built with Ink + React:
+
+```
+┌─────────────────────────────────────────┐
+│              Header                     │
+│  ✦ huagent v4.3.1                     │
+│  Connected to Anthropic/claude-4.6     │
+├─────────────────────────────────────────┤
+│                                         │
+│  Chat Messages                          │
+│  > user message                         │
+│  ✧ agent response                       │
+│                                         │
+├─────────────────────────────────────────┤
+│  Input Box                              │
+│  > _                                    │
+├─────────────────────────────────────────┤
+│  Status Bar                             │
+│  tokens: 1234 | cost: $0.0045          │
+└─────────────────────────────────────────┘
+```
+
+#### TUI Components
+
+| Component | File | Description |
+|-----------|------|-------------|
+| **ModernApp** | `ModernApp.tsx` | Main TUI component |
+| **Header** | `new-layout.tsx` | Header with provider/model |
+| **StatusBar** | `status.tsx` | Token/cost display |
+| **Picker** | `picker.tsx` | Model/provider selector |
+| **Dialogs** | `dialog-controller.ts` | Question/permission dialogs |
+
+---
+
+### 6. Hooks (`src/hooks.ts`)
+
+**Lifecycle hooks** for extensibility:
+
+```
+User Message
+    ↓
+  UserPrompt hook
+    ↓
+  PreLLMCall hook
+    ↓
+  (LLM call)
+    ↓
+  PostLLMCall hook
+    ↓
+  PreToolUse hook
+    ↓
+  (Tool execution)
+    ↓
+  PostToolUse hook
+    ↓
+  PreCompact hook
+    ↓
+  (Memory compaction)
+    ↓
+  PostCompact hook
+    ↓
+  AssistantReply hook
+    ↓
+  SessionEnd hook
+```
+
+#### Built-in Hooks
+
+```typescript
+// Log tool usage
+hooks.on('PostToolUse', (ctx) => {
+  console.log(`Tool ${ctx.tool} executed`);
+});
+
+// Auto-save after each reply
+hooks.on('AssistantReply', (ctx) => {
+  saveSession(ctx.sessionId);
+});
+```
+
+---
+
+## Data Flow
+
+### Complete Request Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        USER                                 │
+│                      (types message)                        │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                        TUI                                  │
+│              (ModernApp.tsx)                                │
+│  - Render input box                                         │
+│  - Capture user input                                       │
+│  - Call engine.process()                                    │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                      ENGINE                                 │
+│                  (core.ts)                                  │
+│                                                             │
+│  1. UNDERSTAND                                              │
+│     ├─ detectTaskType("fix bug") → code_fix                │
+│     ├─ detectComplexity(msg) → moderate                    │
+│     └─ memory.recall("fix bug") → [past memories]          │
+│                                                             │
+│  2. PLAN                                                    │
+│     └─ planner.plan(msg) → { steps: [...] }                │
+│                                                             │
+│  3. EXECUTE                                                 │
+│     ├─ for each step:                                       │
+│     │   └─ tools.execute(step.tool, step.args)             │
+│     └─ feed results back to LLM                            │
+│                                                             │
+│  4. VERIFY                                                  │
+│     └─ critic.score(plan) → { score: 4.5, verdict: pass } │
+│                                                             │
+│  5. REFINE                                                  │
+│     └─ (skip if verdict=pass)                               │
+│                                                             │
+│  6. REFLECT                                                 │
+│     └─ memory.save("Fixed login bug")                      │
+│                                                             │
+│  Return response                                            │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     PROVIDER                                │
+│                (client.ts)                                  │
+│  - UnifiedClient.stream()                                   │
+│  - Send to Anthropic/OpenAI/Gemini/etc                      │
+│  - Receive streaming response                               │
+│  - Track tokens/cost                                        │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     LLM API                                 │
+│            (Anthropic/OpenAI/etc)                           │
+│  - Process request                                          │
+│  - Generate response                                        │
+│  - Return streaming chunks                                  │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                      TUI                                    │
+│  - Render streaming response                                │
+│  - Update token/cost display                                │
+│  - Save to conversation history                             │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ↓
+┌─────────────────────────────────────────────────────────────┐
+│                        USER                                 │
+│                    (sees response)                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## File Structure
+
+```
+huagent/
+├── src/
+│   ├── engine/              # 6-stage workflow engine
+│   │   ├── core.ts          # Main engine (781 lines)
+│   │   ├── planner.ts       # Plan generation
+│   │   ├── critic.ts        # Result scoring
+│   │   └── reflector.ts     # Lesson extraction
+│   │
+│   ├── providers/           # 26 LLM providers
+│   │   ├── client.ts        # UnifiedClient (368 lines)
+│   │   ├── registry.ts      # Provider registry
+│   │   ├── models.ts        # Model definitions
+│   │   ├── capabilities.ts  # Pattern-based capabilities
+│   │   ├── pricing.ts       # Pattern-based pricing
+│   │   └── proxy-fetch.ts   # Proxy support
+│   │
+│   ├── memory/              # Memory system
+│   │   ├── store.ts         # SQLite storage (296 lines)
+│   │   ├── manager.ts       # Memory manager (172 lines)
+│   │   └── pressure.ts      # Memory pressure detection
+│   │
+│   ├── tools/               # 8 built-in tools
+│   │   ├── index.ts         # Tool registry
+│   │   ├── read.ts          # Read file
+│   │   ├── write.ts         # Write file
+│   │   ├── edit.ts          # Edit file
+│   │   ├── bash.ts          # Bash command
+│   │   ├── search.ts        # Search files
+│   │   ├── grep.ts          # Grep content
+│   │   ├── web.ts           # Web fetch
+│   │   └── memory.ts        # Memory tool
+│   │
+│   ├── tui/                 # Terminal UI
+│   │   ├── ModernApp.tsx    # Main TUI (725 lines)
+│   │   ├── new-layout.tsx   # Layout components
+│   │   ├── status.tsx       # Status bar
+│   │   ├── picker.tsx       # Model/provider picker
+│   │   └── dialog-controller.ts  # Dialogs
+│   │
+│   ├── hooks.ts             # Lifecycle hooks (188 lines)
+│   ├── sessions.ts          # Session management
+│   ├── permissions.ts       # Permission system
+│   ├── slash-commands.ts    # 28 slash commands
+│   ├── skills.ts            # Skill system
+│   ├── summary.ts           # Conversation summarization
+│   └── cli.tsx              # CLI entry point (477 lines)
+│
+├── tests/                   # Test files
+│   ├── engine/
+│   │   └── core.test.ts     # Engine tests
+│   └── integration/
+│       └── e2e.test.ts      # End-to-end tests
+│
+├── docs/                    # Documentation
+│   ├── USER_GUIDE.md        # User guide (797 lines)
+│   ├── ARCHITECTURE.md      # This file
+│   └── CONTRIBUTING.md      # Contributor guide
+│
+├── package.json             # Dependencies
+├── tsconfig.json            # TypeScript config
+└── README.md                # Project README
+```
+
+---
+
+## Design Principles
+
+### 1. **Unified Engine**
+- No V3/V4 split — one engine for all use cases
+- 6-stage workflow for complex tasks
+- Simple chat for trivial questions
+
+### 2. **Provider Flexibility**
+- 26 providers with unified interface
+- Easy to add new providers
+- Automatic retry and fallback
+
+### 3. **Intelligent Memory**
+- 4 types of memory (episodic, semantic, procedural, project)
+- Exponential decay for recency
+- Automatic memory compaction
+
+### 4. **Safety First**
+- 5 permission modes
+- Tool execution sandboxing
+- Dangerous command blocking
+
+### 5. **Extensibility**
+- Lifecycle hooks for customization
+- Custom tools support
+- Custom system prompts
+
+### 6. **Cost Awareness**
+- Real-time token/cost tracking
+- Pattern-based pricing
+- Effort level control
+
+---
+
+## Performance
+
+### Latency Breakdown
+
+| Stage | Typical Latency | Notes |
+|-------|----------------|-------|
+| Understand | 10-50ms | Regex + memory recall |
+| Plan | 500-2000ms | LLM call |
+| Execute | 100-5000ms | Depends on tools |
+| Verify | 500-1500ms | LLM call |
+| Refine | 0-3000ms | 0-3 iterations |
+| Reflect | 50-200ms | Memory save |
+
+**Total:** 1-10 seconds for complex tasks, <1 second for trivial questions.
+
+### Memory Usage
+
+- **SQLite database:** ~1-10 MB (depends on conversation history)
+- **In-memory:** ~50-100 MB (depends on conversation length)
+- **Node.js process:** ~100-200 MB total
+
+### Token Usage
+
+| Task Type | Typical Tokens | Cost (Claude Sonnet) |
+|-----------|---------------|---------------------|
+| Trivial question | 100-300 | $0.0003-0.001 |
+| Simple task | 500-1500 | $0.002-0.005 |
+| Moderate task | 2000-5000 | $0.006-0.015 |
+| Complex task | 5000-15000 | $0.015-0.045 |
+
+---
+
+## Security
+
+### API Key Storage
+
+- Stored in `~/.huagent/config.json`
+- File permissions: `600` (owner read/write only)
+- Never logged or exposed in TUI
+
+### Tool Execution
+
+- **Permission modes** restrict tool access
+- **Workspace boundary** prevents writes outside project
+- **Dangerous command blocking** prevents `rm -rf /`, etc.
+
+### Network Security
+
+- HTTPS only for API calls
+- Certificate validation enabled
+- Proxy support for corporate networks
+
+---
+
+## Future Work
+
+### Phase 2: WllmConcept Integration (Q2 2026)
+- Wire WikiStore to engine
+- 5-memory routing
+- Auto-ingest on file change
+- Scheduled lint
+
+### Phase 3: TUI Polish (Q3 2026)
+- Syntax highlighting
+- Diff view
+- File tree visualization
+- Progress indicators
+
+### Phase 4: UX Polish (Q3 2026)
+- Better error messages
+- Smart autocomplete
+- Clickable file paths
+- Loading states
+
+### Phase 5: Observability (Q4 2026)
+- Structured logging
+- Prometheus metrics
+- Grafana dashboards
+- Health checks
+
+---
+
+## References
+
+- [User Guide](./USER_GUIDE.md)
+- [Contributing Guide](./CONTRIBUTING.md)
+- [CHANGELOG](../CHANGELOG.md)
+- [LICENSE](../LICENSE)
+
+---
+
+**Architecture designed for extensibility, safety, and intelligence. 🧠✨**

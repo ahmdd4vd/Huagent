@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { getProvider, getChatUrl, type ProviderConfig, type ProviderId } from './registry.js';
 import { getModelCost, getModel, getDefaultModel } from './models.js';
+import { getPricing, calculateCost as calcPatternCost } from './pricing.js';
 import { EventEmitter } from 'node:events';
 
 export type StreamEvent =
@@ -53,8 +54,9 @@ export interface UnifiedClientStats {
  * stays in sync with the rest of the system.
  */
 function calculateCost(providerId: ProviderId, model: string, inputTokens: number, outputTokens: number): number {
-  const pricing = getModelCost(providerId, model);
-  return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
+  // Use pattern-based pricing resolver (more accurate than per-model registry lookup)
+  const pricing = getPricing(providerId, model);
+  return calcPatternCost(inputTokens, outputTokens, pricing);
 }
 
 export class UnifiedClient extends EventEmitter {
@@ -112,6 +114,8 @@ export class UnifiedClient extends EventEmitter {
     this.stats.cost = 0;
     this.stats.inputTokens = 0;
     this.stats.outputTokens = 0;
+    this.stats.totalInputTokens = 0;
+    this.stats.totalOutputTokens = 0;
   }
 
   /**
@@ -122,17 +126,38 @@ export class UnifiedClient extends EventEmitter {
     return getModel(this.provider.id, this.getModel()) ? [getModel(this.provider.id, this.getModel())!] : [];
   }
 
-  // Main streaming entry point
+  // Main streaming entry point with retry
   async *stream(req: ProviderRequest): AsyncGenerator<StreamEvent> {
-    try {
-      if (this.provider.apiFormat === 'anthropic') {
-        yield* this.streamAnthropic(req);
-      } else {
-        // All OpenAI-compat formats use the same path
-        yield* this.streamOpenAICompat(req);
+    const maxRetries = 3;
+    let lastError: string | null = null;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (this.provider.apiFormat === 'anthropic') {
+          yield* this.streamAnthropic(req);
+        } else {
+          // All OpenAI-compat and openai-responses formats use the same path
+          // (openai-responses would need a separate handler in the future)
+          yield* this.streamOpenAICompat(req);
+        }
+        return; // success — exit retry loop
+      } catch (err: any) {
+        lastError = err?.message || String(err);
+        // Don't retry on auth errors (401/403) — they won't succeed on retry
+        if (/401|403|authentication|unauthorized|forbidden|invalid_api_key/i.test(lastError)) {
+          yield { type: 'error', error: lastError };
+          return;
+        }
+        if (attempt < maxRetries - 1) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+          await new Promise((r) => setTimeout(r, delay));
+        }
       }
-    } catch (err: any) {
-      yield { type: 'error', error: err?.message || String(err) };
+    }
+
+    // All retries exhausted
+    if (lastError) {
+      yield { type: 'error', error: `All ${maxRetries} attempts failed: ${lastError}` };
     }
   }
 
@@ -159,6 +184,10 @@ export class UnifiedClient extends EventEmitter {
     let inputTokens = 0;
     let outputTokens = 0;
 
+    // Accumulate tool_use args across input_json_delta events
+    const toolArgsBuffer = new Map<number, { id: string; name: string; args: string }>();
+    let currentToolIndex = -1;
+
     for await (const event of stream) {
       const ev = event as any;
       if (ev.type === 'content_block_start') {
@@ -166,7 +195,8 @@ export class UnifiedClient extends EventEmitter {
         if (block?.type === 'thinking') {
           yield { type: 'thinking', content: block.thinking || '' };
         } else if (block?.type === 'tool_use') {
-          yield { type: 'tool_use', id: block.id, name: block.name, args: block.input || {} };
+          currentToolIndex++;
+          toolArgsBuffer.set(currentToolIndex, { id: block.id, name: block.name, args: '' });
         }
       } else if (ev.type === 'content_block_delta') {
         const delta = ev.delta;
@@ -175,6 +205,23 @@ export class UnifiedClient extends EventEmitter {
           yield { type: 'text_delta', delta: delta.text, accumulated: textAccum };
         } else if (delta?.type === 'thinking_delta') {
           yield { type: 'thinking', content: delta.thinking || '' };
+        } else if (delta?.type === 'input_json_delta') {
+          // Accumulate tool args JSON fragments
+          const tool = toolArgsBuffer.get(currentToolIndex);
+          if (tool && delta.partial_json) {
+            tool.args += delta.partial_json;
+          }
+        }
+      } else if (ev.type === 'content_block_stop') {
+        // Flush accumulated tool_use block
+        const tool = toolArgsBuffer.get(currentToolIndex);
+        if (tool) {
+          yield {
+            type: 'tool_use',
+            id: tool.id,
+            name: tool.name,
+            args: this.parseToolArgs(tool.args),
+          };
         }
       } else if (ev.type === 'message_delta') {
         if (ev.usage) outputTokens = ev.usage.output_tokens || outputTokens;
@@ -193,7 +240,10 @@ export class UnifiedClient extends EventEmitter {
   // OpenAI-compat streaming (works for OpenAI, Gemini, Mistral, NVIDIA, MiniMax, xAI, Ollama,
   // GitHub, DeepSeek, Groq, Cerebras, OpenRouter, Together, Fireworks, Perplexity, HF, etc.)
   private async *streamOpenAICompat(req: ProviderRequest): AsyncGenerator<StreamEvent> {
-    const client = new OpenAI({ apiKey: this.apiKey, baseURL: this.baseUrl });
+    // Ollama and some local providers accept empty/dummy API keys.
+    // The OpenAI SDK requires a non-empty string, so pass a dummy value.
+    const effectiveKey = this.apiKey || (this.provider.id === 'ollama' ? 'ollama' : this.apiKey);
+    const client = new OpenAI({ apiKey: effectiveKey, baseURL: this.baseUrl });
 
     const messages: any[] = [];
     if (req.system) messages.push({ role: 'system', content: req.system });

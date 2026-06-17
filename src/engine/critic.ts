@@ -61,7 +61,17 @@ Step results:
 Evaluate now:`;
 
 export class Critic {
-  constructor(private client: UnifiedClient) {}
+  /** Optional cheaper model for critique (falls back to main client model) */
+  private criticModel?: string;
+
+  constructor(private client: UnifiedClient, criticModel?: string) {
+    this.criticModel = criticModel;
+  }
+
+  /** Set the model used for critique calls (e.g. a cheaper/faster model). */
+  setCriticModel(model: string): void {
+    this.criticModel = model;
+  }
 
   async critique(plan: Plan): Promise<CritiqueResult> {
     const stepsSummary = plan.steps
@@ -85,7 +95,7 @@ export class Critic {
 
     let text = '';
     for await (const event of this.client.stream({
-      model: this.client.getModel(),
+      model: this.criticModel || this.client.getModel(),
       system: prompt,
       messages: [{ role: 'user', content: 'Evaluate this plan execution.' }],
       temperature: 0.1,

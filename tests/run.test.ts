@@ -15,6 +15,7 @@ const execFileP = promisify(execFile);
 const ROOT = join(__dirname, '..');
 
 const TEST_FILES = [
+  { file: 'tests/engine.test.ts', minPass: 20 },
   { file: 'tests/tui-v4.test.ts', minPass: 100 },
   { file: 'tests/discipline.test.ts', minPass: 100 },
   { file: 'tests/cli-commands.test.ts', minPass: 50 },

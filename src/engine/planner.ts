@@ -148,12 +148,12 @@ export class Planner {
   }
 
   private extractJson(text: string): any {
-    // Try direct parse
+    // 1. Try direct parse (cleanest case)
     try {
       return JSON.parse(text);
     } catch {}
 
-    // Try code block
+    // 2. Try code block (```json ... ```)
     const match = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
     if (match) {
       try {
@@ -161,13 +161,30 @@ export class Planner {
       } catch {}
     }
 
-    // Try first object
-    const objMatch = text.match(/\{[\s\S]+\}/);
-    if (objMatch) {
-      try {
-        return JSON.parse(objMatch[0]);
-      } catch {}
+    // 3. Find balanced JSON object (not greedy — tracks brace depth)
+    const startIdx = text.indexOf('{');
+    if (startIdx !== -1) {
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let i = startIdx; i < text.length; i++) {
+        const ch = text[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            try {
+              return JSON.parse(text.slice(startIdx, i + 1));
+            } catch { break; }
+          }
+        }
+      }
     }
+
     return null;
   }
 }

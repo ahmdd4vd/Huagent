@@ -1131,6 +1131,134 @@ export const MODELS: Record<ProviderId, ModelInfo[]> = {
   ],
 
   // ────────────────────────────────────────────────────────────────
+  qoder: [
+    {
+      id: 'qoder-large',
+      label: 'Qoder Large',
+      family: 'qoder',
+      context: 200000,
+      output: 32768,
+      cost: { input: 2, output: 8 },
+      capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true },
+      tier: 'flagship',
+    },
+    {
+      id: 'qoder-fast',
+      label: 'Qoder Fast',
+      family: 'qoder',
+      context: 128000,
+      output: 16384,
+      cost: { input: 0.5, output: 2 },
+      capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true },
+      tier: 'fast',
+    },
+  ],
+
+  kiro: [
+    {
+      id: 'kiro-coder',
+      label: 'Kiro Coder',
+      family: 'kiro',
+      context: 200000,
+      output: 32768,
+      cost: { input: 2, output: 8 },
+      capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true },
+      tier: 'code',
+    },
+  ],
+
+  antigravity: [
+    {
+      id: 'gemini-2.5-flash',
+      label: 'Gemini 2.5 Flash (Antigravity)',
+      family: 'gemini',
+      context: 1048576,
+      output: 65536,
+      cost: { input: 0, output: 0 },
+      capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true },
+      tier: 'fast',
+      notes: 'Free via Antigravity OAuth',
+    },
+  ],
+
+  'gemini-cli': [
+    {
+      id: 'gemini-2.5-flash',
+      label: 'Gemini 2.5 Flash (CLI)',
+      family: 'gemini',
+      context: 1048576,
+      output: 65536,
+      cost: { input: 0, output: 0 },
+      capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true },
+      tier: 'fast',
+      notes: 'Free via Gemini API key or OAuth',
+    },
+  ],
+
+  azure: [
+    { id: 'gpt-4o', label: 'GPT-4o (Azure)', family: 'gpt', context: 128000, output: 16384, cost: { input: 2.5, output: 10 }, capabilities: { toolCall: true, vision: true, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  cohere: [
+    { id: 'command-a-03-2025', label: 'Command A', family: 'command', context: 128000, output: 4096, cost: { input: 2.5, output: 10 }, capabilities: { toolCall: true, vision: true, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+    { id: 'command-r-plus-08-2024', label: 'Command R+', family: 'command', context: 128000, output: 4096, cost: { input: 2.5, output: 10 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  nebius: [
+    { id: 'meta-llama/Llama-3.3-70B-Instruct', label: 'Llama 3.3 70B', family: 'llama', context: 128000, output: 8192, cost: { input: 0.5, output: 0.5 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  'cloudflare-ai': [
+    { id: '@cf/meta/llama-3.3-70b-instruct-fp8-fast', label: 'Llama 3.3 70B (CF)', family: 'llama', context: 128000, output: 8192, cost: { input: 0, output: 0 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship', notes: 'Free tier' },
+    { id: '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b', label: 'DeepSeek R1 32B (CF)', family: 'deepseek', context: 128000, output: 8192, cost: { input: 0, output: 0 }, capabilities: { toolCall: true, vision: false, reasoning: true, streaming: true, json: true }, tier: 'reasoning', notes: 'Free tier' },
+  ],
+  siliconflow: [
+    { id: 'deepseek-ai/DeepSeek-V3.2', label: 'DeepSeek V3.2', family: 'deepseek', context: 128000, output: 8192, cost: { input: 0.14, output: 0.28 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+    { id: 'Qwen/Qwen3.5-397B-A17B', label: 'Qwen 3.5 397B', family: 'qwen', context: 262144, output: 32768, cost: { input: 0.5, output: 2 }, capabilities: { toolCall: true, vision: false, reasoning: true, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  hyperbolic: [
+    { id: 'meta-llama/Llama-3.3-70B-Instruct', label: 'Llama 3.3 70B', family: 'llama', context: 128000, output: 8192, cost: { input: 0.4, output: 0.4 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+    { id: 'deepseek-ai/DeepSeek-R1', label: 'DeepSeek R1', family: 'deepseek', context: 128000, output: 32768, cost: { input: 0.55, output: 2.19 }, capabilities: { toolCall: true, vision: false, reasoning: true, streaming: true, json: true }, tier: 'reasoning' },
+  ],
+  chutes: [
+    { id: 'deepseek-ai/DeepSeek-R1', label: 'DeepSeek R1', family: 'deepseek', context: 128000, output: 32768, cost: { input: 0.55, output: 2.19 }, capabilities: { toolCall: true, vision: false, reasoning: true, streaming: true, json: true }, tier: 'reasoning' },
+  ],
+  glm: [
+    { id: 'glm-4-plus', label: 'GLM 4 Plus', family: 'glm', context: 128000, output: 4096, cost: { input: 0.5, output: 2 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+    { id: 'glm-4v', label: 'GLM 4V (Vision)', family: 'glm', context: 128000, output: 4096, cost: { input: 0.75, output: 3 }, capabilities: { toolCall: true, vision: true, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  kimi: [
+    { id: 'moonshot-v1-128k', label: 'Moonshot V1 128K', family: 'kimi', context: 128000, output: 4096, cost: { input: 1, output: 4 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+    { id: 'kimi-k2.5', label: 'Kimi K2.5', family: 'kimi', context: 128000, output: 8192, cost: { input: 1, output: 4 }, capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  cline: [
+    { id: 'anthropic/claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (Cline)', family: 'claude', context: 200000, output: 8192, cost: { input: 3, output: 15 }, capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  codebuddy: [
+    { id: 'hunyuan-turbos-latest', label: 'Hunyuan TurboS', family: 'hunyuan', context: 256000, output: 8192, cost: { input: 0, output: 0 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  kilocode: [
+    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (Kilo)', family: 'claude', context: 200000, output: 8192, cost: { input: 3, output: 15 }, capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  commandcode: [
+    { id: 'deepseek-ai/deepseek-chat', label: 'DeepSeek Chat', family: 'deepseek', context: 128000, output: 8192, cost: { input: 0.27, output: 1.1 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  blackbox: [
+    { id: 'blackboxai', label: 'Blackbox AI', family: 'blackbox', context: 128000, output: 4096, cost: { input: 0, output: 0 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  'vercel-ai': [
+    { id: 'openai/gpt-4o', label: 'GPT-4o (Vercel)', family: 'gpt', context: 128000, output: 16384, cost: { input: 2.5, output: 10 }, capabilities: { toolCall: true, vision: true, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  volcengine: [
+    { id: 'deepseek-v3', label: 'DeepSeek V3 (Volc)', family: 'deepseek', context: 128000, output: 8192, cost: { input: 0.14, output: 0.28 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  'opencode-go': [
+    { id: 'gpt-4o', label: 'GPT-4o (OpenCode Go)', family: 'gpt', context: 128000, output: 16384, cost: { input: 2.5, output: 10 }, capabilities: { toolCall: true, vision: true, reasoning: false, streaming: true, json: true }, tier: 'flagship' },
+  ],
+  'mimo-free': [
+    { id: 'mimo-v2', label: 'MiMo V2 (Free)', family: 'mimo', context: 128000, output: 16384, cost: { input: 0, output: 0 }, capabilities: { toolCall: true, vision: false, reasoning: false, streaming: true, json: true }, tier: 'fast', notes: 'Free tier' },
+  ],
+  'xiaomi-tokenplan': [
+    { id: 'mimo-v2.5-pro', label: 'MiMo V2.5 Pro', family: 'mimo', context: 128000, output: 16384, cost: { input: 0.5, output: 1.5 }, capabilities: { toolCall: true, vision: true, reasoning: true, streaming: true, json: true }, tier: 'flagship' },
+  ],
+
   custom: [
     {
       id: 'MiniMax-M3',
@@ -1197,6 +1325,29 @@ export function getModelCost(providerId: ProviderId, modelId: string): { input: 
     fireworks: { input: 0.9, output: 0.9 },
     perplexity: { input: 3, output: 15 },
     huggingface: { input: 0, output: 0 },
+    qoder: { input: 2, output: 8 },
+    kiro: { input: 2, output: 8 },
+    antigravity: { input: 0, output: 0 },
+    'gemini-cli': { input: 0, output: 0 },
+    azure: { input: 2.5, output: 10 },
+    cohere: { input: 2.5, output: 10 },
+    nebius: { input: 0.5, output: 0.5 },
+    'cloudflare-ai': { input: 0, output: 0 },
+    siliconflow: { input: 0.14, output: 0.28 },
+    hyperbolic: { input: 0.4, output: 0.4 },
+    chutes: { input: 0.55, output: 2.19 },
+    glm: { input: 0.5, output: 2 },
+    kimi: { input: 1, output: 4 },
+    cline: { input: 3, output: 15 },
+    codebuddy: { input: 0, output: 0 },
+    kilocode: { input: 3, output: 15 },
+    commandcode: { input: 0.27, output: 1.1 },
+    blackbox: { input: 0, output: 0 },
+    'vercel-ai': { input: 2.5, output: 10 },
+    volcengine: { input: 0.14, output: 0.28 },
+    'opencode-go': { input: 2.5, output: 10 },
+    'mimo-free': { input: 0, output: 0 },
+    'xiaomi-tokenplan': { input: 0.5, output: 1.5 },
     custom: { input: 0.5, output: 1.5 },
   };
   return fallback[providerId] || { input: 0.5, output: 1.5 };
