@@ -67,7 +67,7 @@ section("1. Task Classification (Regex)");
   test("refactor → code_refactor", (engine as any).detectTaskTypeRegex('refactor the database') === 'code_refactor');
   test("run tests → action", (engine as any).detectTaskTypeRegex('run the test suite') === 'action');
   test("what is → question", (engine as any).detectTaskTypeRegex('what is JavaScript') === 'question');
-  test("hello there → unknown", (engine as any).detectTaskTypeRegex('hello there') === 'unknown');
+  test("hello there → question (greeting fast-path)", (engine as any).detectTaskTypeRegex('hello there') === 'question');
   test("explain code → code_read", (engine as any).detectTaskTypeRegex('explain this function') === 'code_read');
   test("debug error → code_fix", (engine as any).detectTaskTypeRegex('debug this error') === 'code_fix');
 }

@@ -226,8 +226,12 @@ export class Engine {
     let finalPlan: Plan | null = null;
     let finalCritique: CritiqueResult | null = null;
 
-    // Decide path: plan-and-execute vs chat
-    if (this.options.enablePlanning && understand.complexity !== 'trivial') {
+    // Decide path: plan-and-execute vs chat.
+    // 'trivial' and 'simple' tasks go through the fast chat path
+    // (streamAgenticChat — single LLM call). Only 'moderate' and 'complex'
+    // tasks go through the full 6-stage plan-and-execute pipeline
+    // (planner + critic + reflector = 3-4 extra LLM calls).
+    if (this.options.enablePlanning && understand.complexity !== 'trivial' && understand.complexity !== 'simple') {
       // Spawn subagent if needed (research/exploration tasks)
       if (understand.needsSubagent) {
         response = await this.runWithSubagent(userMessage, understand);
@@ -305,9 +309,20 @@ export class Engine {
     // Fast path: regex classification
     let taskType = this.detectTaskTypeRegex(message);
 
-    // If regex returned 'unknown', use LLM for classification
+    // If regex returned 'unknown', DON'T immediately call the LLM for
+    // classification — that's an extra LLM round-trip that adds 2-5s
+    // latency for every ambiguous message. Instead, treat 'unknown' as
+    // 'question' for short messages (under 100 chars), which routes to
+    // the fast chat path. Only call the LLM classifier for longer
+    // ambiguous messages where the distinction actually matters.
     if (taskType === 'unknown') {
-      taskType = await this.detectTaskTypeLLM(message);
+      if (message.length < 100) {
+        // Short ambiguous message → treat as question (fast path)
+        taskType = 'question';
+      } else {
+        // Long ambiguous message → worth the LLM call to classify
+        taskType = await this.detectTaskTypeLLM(message);
+      }
     }
 
     const complexity = this.detectComplexity(message, taskType);
@@ -746,7 +761,14 @@ Be concise. Ship working code.`;
 
   /** Fast regex-based classification. Returns 'unknown' if ambiguous. */
   private detectTaskTypeRegex(message: string): TaskType {
-    const m = message.toLowerCase();
+    const m = message.toLowerCase().trim();
+
+    // FAST PATH: greetings and small talk → 'question' (trivial, no LLM call needed)
+    // This prevents the engine from making an extra LLM call just to classify
+    // "halo", "hi", "thanks", etc. as 'unknown' → triggering detectTaskTypeLLM.
+    const GREETING_PATTERNS = /^(halo|hai|hi|hello|hey|sup|pagi|siang|sore|malam|thanks|terima kasih|makasih|oke|ok|yes|no|iya|nggak|gak|ya|tidak)\b/i;
+    if (GREETING_PATTERNS.test(m) && m.split(/\s+/).length < 15) return 'question';
+
     if (/\b(what does|show me|read|explain|describe|inspect|find|where is)\b/.test(m)) return 'code_read';
     if (/\b(fix|bug|error|broken|fail|crash|debug)\b/.test(m)) return 'code_fix';
     if (/\b(refactor|clean up|improve|optimize|restructure)\b/.test(m)) return 'code_refactor';
@@ -782,7 +804,14 @@ Be concise. Ship working code.`;
   }
 
   private detectComplexity(message: string, taskType: TaskType): ComplexityLevel {
-    if (message.length < 30 && (taskType === 'question' || taskType === 'code_read')) return 'trivial';
+    // FAST PATH: questions and greetings under 60 chars → 'trivial'.
+    // This skips the entire plan-and-execute pipeline (planner LLM call,
+    // critic LLM call, reflector LLM call) and goes straight to
+    // streamAgenticChat (single LLM call). The previous threshold was
+    // 30 chars which was too tight — "halo, kenalin nama saya david"
+    // is 34 chars and fell through to 'simple', triggering the full
+    // 6-stage workflow for a simple greeting.
+    if (message.length < 60 && (taskType === 'question' || taskType === 'code_read')) return 'trivial';
     const words = message.split(/\s+/).length;
     if (words < 8) return 'simple';
     if (words < 25) return 'moderate';
