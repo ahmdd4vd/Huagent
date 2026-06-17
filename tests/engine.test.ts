@@ -98,25 +98,26 @@ section("3. Tool Result Formatting");
 // ─── 4. Memory Tool Handling ──────────────────────────────────────
 section("4. Memory Tool Handling");
 {
-  const saveResult = (engine as any).handleMemoryTool({ action: 'save', content: 'test memory', type: 'episodic' });
+  // handleMemoryTool is async (recall may await on WikiMemory). Use top-level await.
+  const saveResult = await (engine as any).handleMemoryTool({ action: 'save', content: 'test memory', type: 'episodic' });
   test("save action returns ok", saveResult.status === 'ok');
   test("save action returns message", saveResult.message === 'Memory saved');
 
-  const recallResult = (engine as any).handleMemoryTool({ action: 'recall', query: 'test query' });
+  const recallResult = await (engine as any).handleMemoryTool({ action: 'recall', query: 'test query' });
   test("recall action returns ok", recallResult.status === 'ok');
   test("recall action returns memories array", Array.isArray(recallResult.memories));
 
-  const factResult = (engine as any).handleMemoryTool({ action: 'fact', key: 'test-key', value: 'test-value' });
+  const factResult = await (engine as any).handleMemoryTool({ action: 'fact', key: 'test-key', value: 'test-value' });
   test("fact action returns ok", factResult.status === 'ok');
   test("fact action returns message", factResult.message === 'Fact saved: test-key');
 
-  const skillResult = (engine as any).handleMemoryTool({ action: 'skill', name: 'test-skill', description: 'test desc', pattern: 'test pattern' });
+  const skillResult = await (engine as any).handleMemoryTool({ action: 'skill', name: 'test-skill', description: 'test desc', pattern: 'test pattern' });
   test("skill action returns ok", skillResult.status === 'ok');
   test("skill action returns message", skillResult.message === 'Skill learned: test-skill');
 
-  const unknownResult = (engine as any).handleMemoryTool({ action: 'unknown' });
+  const unknownResult = await (engine as any).handleMemoryTool({ action: 'unknown' });
   test("unknown action returns error", unknownResult.status === 'error');
-  test("unknown action returns message", unknownResult.message.includes('Unknown memory action'));
+  test("unknown action returns message", typeof unknownResult.message === 'string' && unknownResult.message.includes('Unknown memory action'));
 }
 
 // ─── 5. Engine State ──────────────────────────────────────

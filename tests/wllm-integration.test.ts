@@ -242,19 +242,25 @@ describe('WllmConcept Integration', () => {
     });
 
     it('should find contradictions', async () => {
-      // Create two contradictory pages
+      // Create two contradictory decisions on the SAME topic.
+      // The Evolver groups pages by normalized label, so to detect a conflict
+      // both pages must share a label. We use the SAME label "Database Choice"
+      // but mark both as ACTIVE decisions with conflicting bodies — the
+      // Evolver's "multiple ACTIVE decisions on same topic" check will fire.
       await wikiStore.createPage({
         pageType: 'decision',
-        label: 'Use PostgreSQL',
+        label: 'Database Choice',
         body: 'We decided to use PostgreSQL',
         confidenceLevel: 'VERIFIED',
+        decisionStatus: 'ACTIVE',
       });
 
       await wikiStore.createPage({
         pageType: 'decision',
-        label: 'Use MongoDB',
+        label: 'Database Choice',
         body: 'We decided to use MongoDB',
         confidenceLevel: 'VERIFIED',
+        decisionStatus: 'ACTIVE',
       });
 
       const evolver = new Evolver(wikiStore);

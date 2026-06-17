@@ -121,13 +121,20 @@ export class WikiStore {
     const confLevel = opts.confidenceLevel ?? numericToConfidence(opts.confidence ?? 0.7);
     const conf = opts.confidence ?? CONFIDENCE_WEIGHT[confLevel];
 
+    // When a page is created with an explicit validFrom in the past (e.g. importing
+    // historical data), seed freshness.lastChecked with that timestamp so staleness
+    // reflects the page's true age rather than "now". This makes the Evolver's
+    // stale-page detection work for back-dated pages.
+    const initialLastChecked = opts.validFrom ?? now;
+    const initialStaleness = computeStaleness(initialLastChecked, this.freshnessWindowMs, now);
+
     // Pack WikiPage-specific fields into properties for roundtrip through GraphStore
     const wikiProps: Record<string, unknown> = {
       pageType: opts.pageType,
       confidenceLevel: confLevel,
       freshness: {
-        lastChecked: now,
-        staleness: "LOW",
+        lastChecked: initialLastChecked,
+        staleness: initialStaleness,
       },
       sources: opts.sources ?? [],
       tags: opts.tags ?? [],
@@ -158,8 +165,8 @@ export class WikiStore {
       confidence: conf,
       confidenceLevel: confLevel,
       freshness: {
-        lastChecked: now,
-        staleness: "LOW",
+        lastChecked: initialLastChecked,
+        staleness: initialStaleness,
       },
       sources: opts.sources ?? [],
       tags: opts.tags ?? [],
@@ -465,13 +472,39 @@ export class WikiStore {
   /**
    * Search across the wiki with a text query.
    * Returns ranked SearchHit[].
+   *
+   * The query is tokenized on whitespace and each token is matched independently
+   * against the page's label, body, tags, and related list. This lets natural
+   * queries like "what is JWT" match a page labelled "JWT Token" — the words
+   * "what" and "is" won't match anything, but "jwt" will. Stop-words are
+   * filtered out so they don't dilute the relevance score.
    */
   async search(query: string, limit: number = 20, intent: QueryIntent = "unknown"): Promise<SearchHit[]> {
-    const t = query.toLowerCase().trim();
-    if (!t) return [];
+    const raw = query.toLowerCase().trim();
+    if (!raw) return [];
 
     // Import weights here to avoid circular dep at top
     const { INTENT_MEMORY_WEIGHTS } = await import("../types/index.js");
+
+    // Tokenize: split on whitespace, drop stop-words and short tokens.
+    // If after filtering there are no tokens left (e.g. query was only stop-words),
+    // fall back to the raw query so we still try to match something.
+    const STOP_WORDS = new Set([
+      "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+      "to", "of", "in", "on", "at", "by", "for", "with", "about", "as",
+      "into", "through", "during", "before", "after", "above", "below",
+      "from", "up", "down", "out", "off", "over", "under", "again",
+      "what", "how", "why", "when", "where", "who", "which", "whose",
+      "do", "does", "did", "doing", "have", "has", "had", "having",
+      "can", "could", "should", "would", "may", "might", "must", "shall",
+      "will", "and", "or", "but", "if", "then", "else", "that", "this",
+      "these", "those", "it", "its", "i", "you", "he", "she", "we", "they",
+    ]);
+    const tokens = raw
+      .split(/\s+/)
+      .map(tok => tok.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, ""))
+      .filter(tok => tok.length > 0 && !STOP_WORDS.has(tok));
+    const searchTokens = tokens.length > 0 ? tokens : [raw];
 
     const allPages = await this.listAll(1000);
     const hits: SearchHit[] = [];
@@ -480,17 +513,31 @@ export class WikiStore {
       const memory = PAGE_TYPE_TO_MEMORY[p.pageType];
       const memoryWeight = INTENT_MEMORY_WEIGHTS[intent][memory];
 
-      // Relevance: simple keyword match
-      const labelMatch = p.label.toLowerCase().includes(t);
-      const bodyMatch = p.body?.toLowerCase().includes(t) ?? false;
-      const tagMatch = p.tags.some(tag => tag.toLowerCase().includes(t));
-      const relatedMatch = p.related.some(r => r.toLowerCase().includes(t));
+      const labelLower = p.label.toLowerCase();
+      const bodyLower = p.body?.toLowerCase() ?? "";
+      const tagsLower = p.tags.map(tag => tag.toLowerCase());
+      const relatedLower = p.related.map(r => r.toLowerCase());
 
+      // Per-token matching — each token contributes independently to relevance.
       let relevance = 0;
-      if (labelMatch) relevance += 0.5;
-      if (bodyMatch) relevance += 0.3;
-      if (tagMatch) relevance += 0.1;
-      if (relatedMatch) relevance += 0.1;
+      let firstMatchIdx = -1;
+      for (const tok of searchTokens) {
+        const labelIdx = labelLower.indexOf(tok);
+        const bodyIdx = bodyLower.indexOf(tok);
+        const tagMatch = tagsLower.some(t => t.includes(tok));
+        const relatedMatch = relatedLower.some(r => r.includes(tok));
+
+        if (labelIdx >= 0) {
+          relevance += 0.5;
+          if (firstMatchIdx === -1 || labelIdx < firstMatchIdx) firstMatchIdx = labelIdx;
+        }
+        if (bodyIdx >= 0) {
+          relevance += 0.3;
+          if (firstMatchIdx === -1) firstMatchIdx = bodyIdx;
+        }
+        if (tagMatch) relevance += 0.1;
+        if (relatedMatch) relevance += 0.1;
+      }
 
       if (relevance === 0) continue;
 
@@ -499,10 +546,10 @@ export class WikiStore {
 
       const score = relevance * confidenceWeight * freshnessWeight * (memoryWeight / 5);
 
-      // Snippet
+      // Snippet — center on the first matching token in the body, fall back to label.
       let snippet = "";
       if (p.body) {
-        const idx = p.body.toLowerCase().indexOf(t);
+        const idx = firstMatchIdx >= 0 ? p.body.toLowerCase().indexOf(searchTokens[0]) : -1;
         if (idx >= 0) {
           const start = Math.max(0, idx - 50);
           const end = Math.min(p.body.length, idx + 150);
@@ -510,6 +557,8 @@ export class WikiStore {
         } else {
           snippet = p.body.slice(0, 200);
         }
+      } else {
+        snippet = p.label;
       }
 
       hits.push({

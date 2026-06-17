@@ -1,6 +1,6 @@
 /**
  * Auto-Ingest Service — Watch files and automatically create/update wiki pages.
- * 
+ *
  * Features:
  * - File watching with chokidar
  * - Automatic entity/concept extraction
@@ -10,6 +10,7 @@
  */
 
 import * as chokidar from 'chokidar';
+import { resolve, isAbsolute, join, basename } from 'node:path';
 import { ContentAnalyzer, type AnalyzedContent, type Entity, type Concept } from './content-analyzer.js';
 import type { WikiStore } from '../graph/wiki-store.js';
 import type { PageType, ConfidenceLevel } from '../types/index.js';
@@ -43,10 +44,112 @@ export interface IngestStats {
   errors: number;
 }
 
+/**
+ * Compile a list of glob ignore patterns into a single matcher function.
+ *
+ * Chokidar v5 passes the full absolute path to `ignored`. Its built-in glob
+ * handling is anchored at the start of the path, so a pattern like
+ * "double-star-slash-*.test.ts" does NOT match "/tmp/foo/test.test.ts"
+ * because the leading "double-star-slash" expects at least one path segment
+ * before the "*.test.ts" suffix. To make the patterns work as users
+ * intuitively expect (regardless of whether they wrote "*.test.ts" or
+ * "double-star-slash-*.test.ts"), we test each pattern against three
+ * representations of the path:
+ *
+ *   1. The full absolute path.
+ *   2. The basename of the path.
+ *   3. The path relative to the watch root.
+ *
+ * If any representation matches any pattern, the file is ignored.
+ *
+ * The glob-to-regex conversion handles the patterns huagent actually uses:
+ *   - "double-star-slash-*.ext"  → any file with the given extension
+ *   - "dir-slash-double-star"    → the directory itself and everything inside
+ *   - "*.ext"                    → any file with the given extension (no
+ *                                  path separators)
+ *   - "name"                     → literal substring match (used for `dist`,
+ *                                  `build`, etc.)
+ *
+ * This is "good enough" — chokidar v5 dropped picomatch as a dep so we can't
+ * rely on a fully spec-compliant glob engine.
+ *
+ * Implementation note: we walk the pattern char-by-char and emit regex
+ * tokens into a buffer. This avoids the multi-step replace-corrupts-earlier-
+ * replacements bug you get when you try to do this with chained string
+ * replacements — e.g. when an intermediate result like "?:DOTSTAR SLASH
+ * CLOSE-PAREN QUESTION SINGLE_STAR DOT ts" is fed back through the
+ * single-star-to-NOTSLASH-STAR step, the star inside the optional group
+ * also gets rewritten, producing a broken regex.
+ */
+function globToRegex(pattern: string): RegExp {
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    const next = pattern[i + 1];
+
+    if (ch === '*' && next === '*') {
+      // Globstar. Skip the optional trailing slash.
+      i++; // consume second `*`
+      if (pattern[i + 1] === '/') i++; // consume trailing `/`
+      out += '.*';
+      continue;
+    }
+    if (ch === '*') {
+      out += '[^/\\\\]*';
+      continue;
+    }
+    if (ch === '?') {
+      out += '[^/\\\\]';
+      continue;
+    }
+    if ('.+^${}()|[]\\'.includes(ch)) {
+      out += '\\' + ch;
+      continue;
+    }
+    out += ch;
+  }
+  return new RegExp('^' + out + '$', 'i');
+}
+
+function compileIgnoreMatcher(
+  patterns: string[],
+  watchRoot: string,
+): (path: string) => boolean {
+  const matchers = patterns.map((p) => {
+    const re = globToRegex(p);
+    const stripped = p.replace(/\*\*/g, '').replace(/\*/g, '');
+    return (s: string): boolean => {
+      if (re.test(s)) return true;
+      // Fallback: substring on stripped pattern (catches `node_modules/**`
+      // matching `/foo/node_modules/bar` because the stripped form is
+      // `node_modules/` which appears in the path).
+      if (stripped.length > 0 && s.includes(stripped)) return true;
+      return false;
+    };
+  });
+
+  return (testPath: string): boolean => {
+    if (!testPath) return false;
+    const base = basename(testPath);
+    let rel = testPath;
+    if (testPath.startsWith(watchRoot)) {
+      rel = testPath.slice(watchRoot.length).replace(/^[/\\]+/, '');
+    }
+    for (const m of matchers) {
+      if (m(testPath) || m(base) || (rel && m(rel))) return true;
+    }
+    return false;
+  };
+}
+
 export class AutoIngest {
   private analyzer: ContentAnalyzer;
   private watcher: chokidar.FSWatcher | null = null;
   private options: Required<AutoIngestOptions>;
+  /** The absolute root path the watcher was started on. Used to relativise event paths. */
+  private watchRoot: string = '';
+  /** Resolves when chokidar's 'ready' event has fired (or 2s safety timeout). */
+  private readyPromise: Promise<void> = Promise.resolve();
   private stats: IngestStats = {
     filesWatched: 0,
     filesIngested: 0,
@@ -77,25 +180,75 @@ export class AutoIngest {
 
   /**
    * Start watching files.
+   *
+   * Returns a Promise that resolves once chokidar has finished its initial
+   * scan and is ready to detect file changes. Callers that immediately write
+   * files after `start()` should `await` this Promise to avoid a race where
+   * the write happens before the watcher's `fs.watch` listener is attached.
    */
-  start(watchPath?: string): void {
+  start(watchPath?: string): Promise<void> {
     if (this.watcher) {
       console.warn('[AutoIngest] Already watching');
-      return;
+      return Promise.resolve();
     }
 
-    const pathToWatch = watchPath || process.cwd();
+    const pathToWatch = watchPath ? resolve(watchPath) : process.cwd();
+    this.watchRoot = pathToWatch;
     console.log(`[AutoIngest] Starting file watcher on ${pathToWatch}`);
 
-    this.watcher = chokidar.watch(this.options.watchPatterns, {
-      cwd: pathToWatch,
-      ignored: this.options.ignorePatterns,
+    // Compile ignore patterns into a matcher that handles absolute paths.
+    // Chokidar v5's string/array ignored doesn't always match absolute paths
+    // the way users expect, so we wrap it in a function.
+    const ignoreMatcher = compileIgnoreMatcher(this.options.ignorePatterns, pathToWatch);
+
+    // Build a watch filter that combines the ignore matcher with the
+    // watchPatterns (which specify which file extensions to ingest).
+    // We watch the directory itself (chokidar v5 dropped glob-pattern
+    // support, so passing globs silently fails to emit events) and filter
+    // events down to the file types we care about.
+    const watchExtRegex = this.buildWatchExtensionRegex();
+
+    const watchFilter = (testPath: string): boolean => {
+      if (!testPath) return false;
+      // Always allow directories (chokidar passes them to `ignored` too).
+      // We can't tell directories from files here without `stats`, so we
+      // let chokidar's own.isDirectory check handle that — only apply our
+      // file-extension filter when the path looks like a file.
+      if (ignoreMatcher(testPath)) return true;
+      // If watchPatterns is restrictive (e.g. only `*.ts`), filter out
+      // files that don't match. We do this by checking the basename
+      // against the extension regex.
+      if (watchExtRegex && testPath.includes('.')) {
+        return !watchExtRegex.test(testPath);
+      }
+      return false;
+    };
+
+    this.watcher = chokidar.watch(pathToWatch, {
+      ignored: watchFilter,
       persistent: true,
       ignoreInitial: true,
+      // Keep the awaitWriteFinish threshold low so tests don't have to wait
+      // 500ms+ for a file to be considered "stable". 50ms is enough to coalesce
+      // rapid fsync bursts while still being responsive.
       awaitWriteFinish: {
-        stabilityThreshold: 500,
-        pollInterval: 100,
+        stabilityThreshold: 50,
+        pollInterval: 20,
       },
+    });
+
+    // Resolve the ready promise on the 'ready' event. We also resolve on
+    // 'error' to avoid hanging tests if chokidar fails to initialize.
+    this.readyPromise = new Promise<void>((resolve) => {
+      const onReady = () => {
+        console.log('[AutoIngest] Watcher ready');
+        resolve();
+      };
+      this.watcher!.once('ready', onReady);
+      this.watcher!.once('error', () => resolve());
+      // Safety net: if 'ready' never fires (e.g. on some networked
+      // filesystems), resolve after 2 seconds so callers don't hang.
+      setTimeout(() => resolve(), 2000);
     });
 
     this.watcher
@@ -105,10 +258,25 @@ export class AutoIngest {
       .on('error', (error) => {
         console.error('[AutoIngest] Watcher error:', error);
         this.stats.errors++;
-      })
-      .on('ready', () => {
-        console.log('[AutoIngest] Watcher ready');
       });
+
+    return this.readyPromise;
+  }
+
+  /**
+   * Build a regex that matches file extensions explicitly listed in
+   * `watchPatterns`. Returns null if watchPatterns is "star-star-slash-star"
+   * (i.e. match everything).
+   */
+  private buildWatchExtensionRegex(): RegExp | null {
+    // Extract file extensions from patterns like `**/*.ts` or `*.tsx`.
+    const exts: string[] = [];
+    for (const p of this.options.watchPatterns) {
+      const m = p.match(/\*\.([a-zA-Z0-9]+)$/);
+      if (m) exts.push(m[1]);
+    }
+    if (exts.length === 0) return null;
+    return new RegExp('\\.(' + exts.map(e => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')$', 'i');
   }
 
   /**
@@ -129,36 +297,49 @@ export class AutoIngest {
   }
 
   /**
+   * Normalize an event path to an absolute path.
+   * Chokidar emits absolute paths when given absolute watch patterns, but we
+   * keep this fallback for safety in case the watcher is configured with `cwd`.
+   */
+  private toAbsolutePath(path: string): string {
+    if (isAbsolute(path)) return path;
+    return join(this.watchRoot, path);
+  }
+
+  /**
    * Handle file change (add or change).
    */
   private handleFileChange(path: string, event: 'add' | 'change'): void {
+    const absPath = this.toAbsolutePath(path);
+
     // Debounce to avoid spam
-    const existingTimer = this.debounceTimers.get(path);
+    const existingTimer = this.debounceTimers.get(absPath);
     if (existingTimer) {
       clearTimeout(existingTimer);
     }
 
     const timer = setTimeout(async () => {
       try {
-        await this.ingestFile(path, event);
+        await this.ingestFile(absPath, event);
       } catch (error) {
-        console.error(`[AutoIngest] Failed to ingest ${path}:`, error);
+        console.error(`[AutoIngest] Failed to ingest ${absPath}:`, error);
         this.stats.errors++;
       } finally {
-        this.debounceTimers.delete(path);
+        this.debounceTimers.delete(absPath);
       }
     }, this.options.debounceMs);
 
-    this.debounceTimers.set(path, timer);
+    this.debounceTimers.set(absPath, timer);
   }
 
   /**
    * Handle file delete.
    */
   private async handleFileDelete(path: string): Promise<void> {
-    console.log(`[AutoIngest] File deleted: ${path}`);
+    const absPath = this.toAbsolutePath(path);
+    console.log(`[AutoIngest] File deleted: ${absPath}`);
     // TODO: Mark related pages as stale or delete them
-    this.processedFiles.delete(path);
+    this.processedFiles.delete(absPath);
   }
 
   /**

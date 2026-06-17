@@ -2,13 +2,64 @@
  * Tests for Phase 3 TUI Polish components
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { diffLines } from 'diff';
 import hl from 'cli-highlight';
+import chalk from 'chalk';
 import { readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdirSync, writeFileSync } from 'node:fs';
+
+// chalk disables colours when stdout is not a TTY (level = 0). cli-highlight
+// vendors chalk v4 inside its own node_modules, so setting the project's
+// chalk v5 `.level` doesn't affect the colours cli-highlight emits. To make
+// the "highlighted.length > code.length" assertions pass in CI / non-TTY
+// environments, we pass an explicit theme that uses our chalk v5 functions
+// (whose level we force to ≥1 here). The token keys mirror cli-highlight's
+// DEFAULT_THEME so the visual output stays the same.
+beforeAll(() => {
+  chalk.level = Math.max(chalk.level, 1) as 0 | 1 | 2 | 3;
+});
+
+// A theme that uses our (forced-on) chalk v5 functions instead of cli-highlight's
+// bundled chalk v4. This makes the highlighter emit ANSI codes regardless of
+// whether stdout is a TTY.
+const FORCED_THEME = {
+  keyword: chalk.blue,
+  built_in: chalk.cyan,
+  type: chalk.cyan.dim,
+  literal: chalk.blue,
+  number: chalk.green,
+  regexp: chalk.red,
+  string: chalk.red,
+  subst: (s: string) => s,
+  symbol: (s: string) => s,
+  class: chalk.blue,
+  function: chalk.yellow,
+  title: (s: string) => s,
+  params: (s: string) => s,
+  comment: chalk.green,
+  doctag: chalk.green,
+  meta: chalk.grey,
+  'meta-keyword': (s: string) => s,
+  'meta-string': (s: string) => s,
+  section: (s: string) => s,
+  tag: chalk.grey,
+  name: chalk.grey,
+  'selector-attr': (s: string) => s,
+  'selector-class': (s: string) => s,
+  'selector-id': (s: string) => s,
+  'selector-pseudo': (s: string) => s,
+  'template-tag': (s: string) => s,
+  'template-variable': (s: string) => s,
+  variable: (s: string) => s,
+  'variable-language': chalk.cyan,
+  'variable-constant': (s: string) => s,
+  addition: chalk.green,
+  deletion: chalk.red,
+  attribute: chalk.yellow,
+};
 
 describe('Phase 3: TUI Polish', () => {
   describe('Syntax Highlighting', () => {
@@ -22,6 +73,7 @@ function add(a: number, b: number): number {
       const highlighted = hl(code, {
         language: 'typescript',
         ignoreIllegals: true,
+        theme: FORCED_THEME,
       });
 
       expect(highlighted).toBeDefined();
@@ -221,7 +273,11 @@ echo "Hello"
     let tempDir: string;
 
     beforeEach(() => {
-      tempDir = join(tmpdir(), `huagent-test-${Date.now()}`);
+      // Use a high-entropy suffix so two tests running in the same
+      // millisecond don't collide on the same tempDir path. (Date.now()
+      // alone is not enough — vitest can run multiple tests in <1ms.)
+      const rand = Math.random().toString(36).slice(2, 10);
+      tempDir = join(tmpdir(), `huagent-test-${Date.now()}-${rand}`);
       mkdirSync(tempDir, { recursive: true });
     });
 

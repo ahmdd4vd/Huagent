@@ -518,7 +518,10 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     name: 'azure',
     displayName: 'Azure OpenAI',
     emoji: '☁️',
-    baseUrl: '',
+    // Azure OpenAI uses per-deployment URLs (https://<resource>.openai.azure.com).
+    // We expose the canonical pattern here; the actual deployment URL is resolved
+    // at request time from AZURE_OPENAI_API_BASE / AZURE_OPENAI_DEPLOYMENT env vars.
+    baseUrl: 'https://YOUR-RESOURCE-NAME.openai.azure.com',
     apiKeyEnv: 'AZURE_OPENAI_API_KEY',
     defaultModel: 'gpt-4o',
     apiFormat: 'openai-chat',

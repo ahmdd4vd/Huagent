@@ -17,7 +17,10 @@ describe('Auto-Ingest', () => {
 
   beforeEach(async () => {
     store = new WikiStore();
-    tempDir = join(tmpdir(), `huagent-test-${Date.now()}`);
+    // Use a high-entropy suffix so two tests running in the same
+    // millisecond don't collide on the same tempDir path.
+    const rand = Math.random().toString(36).slice(2, 10);
+    tempDir = join(tmpdir(), `huagent-test-${Date.now()}-${rand}`);
     await mkdir(tempDir, { recursive: true });
   });
 
@@ -285,7 +288,7 @@ function add(a: number, b: number): number {
     });
 
     it('should start and stop watcher', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
       expect(autoIngest.isRunning()).toBe(true);
 
       await autoIngest.stop();
@@ -293,7 +296,7 @@ function add(a: number, b: number): number {
     });
 
     it('should ingest file on add', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, 'function add(a: number, b: number): number { return a + b; }');
@@ -312,7 +315,7 @@ function add(a: number, b: number): number {
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, 'function add(a: number, b: number): number { return a + b; }');
 
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       // Modify file
       await writeFile(filePath, 'function multiply(a: number, b: number): number { return a * b; }');
@@ -327,7 +330,7 @@ function add(a: number, b: number): number {
     });
 
     it('should create entity pages', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, `
@@ -356,7 +359,7 @@ class Calculator {
     });
 
     it('should create concept pages', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, `
@@ -382,7 +385,7 @@ class Singleton {
     });
 
     it('should create structure pages', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, `
@@ -402,7 +405,7 @@ function add(a: number, b: number): number {
     });
 
     it('should track processed files', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath1 = join(tempDir, 'test1.ts');
       const filePath2 = join(tempDir, 'test2.ts');
@@ -429,7 +432,7 @@ function add(a: number, b: number): number {
         },
       });
 
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, 'const x = 1;');
@@ -452,7 +455,7 @@ function add(a: number, b: number): number {
         },
       });
 
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
       await writeFile(filePath, 'function add(a: number, b: number): number { return a + b; }');
@@ -466,7 +469,7 @@ function add(a: number, b: number): number {
     });
 
     it('should debounce rapid file changes', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const filePath = join(tempDir, 'test.ts');
 
@@ -491,7 +494,7 @@ function add(a: number, b: number): number {
         ignorePatterns: ['**/*.test.ts', 'dist/**'],
       });
 
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       const testFile = join(tempDir, 'test.test.ts');
       const normalFile = join(tempDir, 'test.ts');
@@ -510,7 +513,7 @@ function add(a: number, b: number): number {
     });
 
     it('should handle errors gracefully', async () => {
-      autoIngest.start(tempDir);
+      await autoIngest.start(tempDir);
 
       // Try to ingest non-existent file (will be caught by watcher)
       const filePath = join(tempDir, 'nonexistent.ts');

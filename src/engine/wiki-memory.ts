@@ -118,7 +118,7 @@ export class WikiMemory {
     return hits.map(hit => ({
       id: hit.page.id,
       content: hit.page.body || hit.page.label,
-      type: this.pageTypeToMemoryType(hit.page.pageType),
+      type: this.pageTypeToMemoryType(hit.page),
       importance: this.confidenceToImportance(hit.page.confidenceLevel),
       lastAccessed: hit.page.freshness.lastChecked,
       createdAt: hit.page.validFrom,
@@ -195,22 +195,43 @@ export class WikiMemory {
 
   /**
    * Convert page type to memory type.
+   *
+   * The new 5-memory system (semantic / episodic / structural / causal / meta)
+   * is collapsed onto the legacy 4-type MemoryEntry union
+   * (episodic / semantic / procedural / project) like this:
+   *
+   *   semantic   → semantic      (entity, concept, source, comparison)
+   *   episodic   → episodic      (episode, failure)
+   *   structural → procedural    (structure — code/architecture how-to)
+   *   causal     → semantic      (decision, tradeoff, migration — facts about
+   *                               decisions we made)
+   *   meta       → procedural    (meta — heuristics/lessons are procedural)
+   *
+   * Additionally, a `concept` page with subtype `'procedural'` (created by
+   * `recordPattern`) maps to `'procedural'` rather than `'semantic'` — this
+   * preserves the original "patterns are procedural" semantic that the
+   * legacy MemoryManager API promised.
    */
-  private pageTypeToMemoryType(pageType: PageType): 'episodic' | 'semantic' | 'procedural' | 'project' {
+  private pageTypeToMemoryType(page: WikiPage): 'episodic' | 'semantic' | 'procedural' | 'project' {
+    // Special case: procedural concept patterns stay procedural.
+    if (page.pageType === 'concept' && page.subtype === 'procedural') {
+      return 'procedural';
+    }
+
     const map: Record<PageType, 'episodic' | 'semantic' | 'procedural' | 'project'> = {
       episode: 'episodic',
-      entity: 'project',
-      concept: 'procedural',
+      entity: 'semantic',
+      concept: 'semantic',
       decision: 'semantic',
       failure: 'episodic',
       tradeoff: 'semantic',
       migration: 'semantic',
-      structure: 'semantic',
-      meta: 'semantic',
+      structure: 'procedural',
+      meta: 'procedural',
       source: 'semantic',
       comparison: 'semantic',
     };
-    return map[pageType] ?? 'episodic';
+    return map[page.pageType] ?? 'episodic';
   }
 
   /**
