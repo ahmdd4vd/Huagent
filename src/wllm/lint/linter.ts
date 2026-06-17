@@ -77,6 +77,8 @@ export interface LintCheckStat {
   pass: number;
   warn: number;
   fail: number;
+  /** Informational issues (not counted as pass or fail). */
+  info: number;
 }
 
 export interface LintSummary {
@@ -357,21 +359,24 @@ export class Linter {
     for (const i of filtered) bySeverity[i.severity]++;
 
     const byCheckMap = new Map<LintCheckId, LintCheckStat>();
-    for (const c of checks) byCheckMap.set(c, { check: c, pass: 0, warn: 0, fail: 0 });
+    for (const c of checks) byCheckMap.set(c, { check: c, pass: 0, warn: 0, fail: 0, info: 0 });
     for (const i of filtered) {
       const stat = byCheckMap.get(i.check);
       if (!stat) continue;
+      // BUGFIX: previously, `info` severity issues incremented `pass`,
+      // inflating the pass count and making the lint grade look better
+      // than reality. Now `info` is tracked in its own bucket.
       if (i.severity === "error") stat.fail++;
       else if (i.severity === "warning") stat.warn++;
-      else stat.pass++;
+      else if (i.severity === "info") stat.info++;
     }
     // Calculate pass counts
     for (const stat of Array.from(byCheckMap.values())) {
       // We don't know exact pass count from issues alone; we infer:
-      // pass = (pages that should be checked by this check) - warn - fail
-      // For simplicity, mark pass as >= 0 and report totalPages - failed - warned
+      // pass = (pages that should be checked by this check) - warn - fail - info
+      // (info issues are NOT passes — they're informational notes.)
       const checked = allPages.length; // rough
-      stat.pass = Math.max(0, checked - stat.warn - stat.fail);
+      stat.pass = Math.max(0, checked - stat.warn - stat.fail - stat.info);
     }
     const byCheck = Array.from(byCheckMap.values());
 

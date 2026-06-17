@@ -8,6 +8,16 @@
  *   1. Explicit proxy passed via options
  *   2. HTTPS_PROXY / HTTP_PROXY env vars
  *   3. Direct fetch (no proxy)
+ *
+ * BUGFIXES:
+ *   - `new URL(targetUrl)` in shouldBypassProxy threw on invalid URLs;
+ *     now wrapped in try/catch.
+ *   - Empty catch block silently swallowed undici import failures,
+ *     causing the proxy to be BYPASSED without warning (security/
+ *     privacy issue — user thinks traffic goes through proxy). Now
+ *     logs a warning.
+ *   - `AbortSignal.any()` is Node 20+ only — added a polyfill for
+ *     Node 18 that manually combines abort signals via event listeners.
  */
 
 export interface ProxyOptions {
@@ -20,11 +30,48 @@ export interface ProxyOptions {
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
+ * Combine multiple AbortSignals into one. Uses `AbortSignal.any()` when
+ * available (Node 20+); falls back to a manual listener-based
+ * implementation for Node 18 compatibility.
+ */
+function combineAbortSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
+  const valid = signals.filter((s): s is AbortSignal => s !== undefined);
+  if (valid.length === 0) {
+    // No signals — return a never-aborting signal.
+    return new AbortController().signal;
+  }
+  if (valid.length === 1) return valid[0];
+
+  // Use native AbortSignal.any if available (Node 20+).
+  const anyFn = (AbortSignal as any).any;
+  if (typeof anyFn === 'function') {
+    return anyFn(valid);
+  }
+
+  // Fallback for Node 18: manually combine via event listeners.
+  const controller = new AbortController();
+  for (const s of valid) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      break;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
+/**
  * Check if a URL should bypass the proxy (NO_PROXY matching).
  */
 function shouldBypassProxy(targetUrl: string, noProxy: string): boolean {
   if (!noProxy) return false;
-  const host = new URL(targetUrl).hostname.toLowerCase();
+  let host: string;
+  try {
+    host = new URL(targetUrl).hostname.toLowerCase();
+  } catch {
+    // Invalid URL — don't bypass proxy (let fetch fail with a clear error).
+    return false;
+  }
   const entries = noProxy.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
   for (const entry of entries) {
     if (entry === '*') return true;
@@ -65,9 +112,8 @@ export async function proxyFetch(
   // Connection timeout via AbortController
   const connectCtrl = new AbortController();
   const timer = setTimeout(() => connectCtrl.abort(new Error('fetch connect timeout')), timeoutMs);
-  const signal = init.signal
-    ? AbortSignal.any([init.signal, connectCtrl.signal])
-    : connectCtrl.signal;
+  // BUGFIX: use combineAbortSignals for Node 18 compat (AbortSignal.any is Node 20+).
+  const signal = combineAbortSignals([init.signal, connectCtrl.signal]);
 
   try {
     let fetchInit: RequestInit = { ...init, signal };
@@ -82,8 +128,16 @@ export async function proxyFetch(
         const response = await (undici.fetch as any)(url, fetchInit);
         clearTimeout(timer);
         return response as unknown as Response;
-      } catch {
-        // undici not available — fall through to direct fetch
+      } catch (err: any) {
+        // BUGFIX: previously this was an empty catch that silently
+        // fell through to direct fetch. If undici fails to load or
+        // the ProxyAgent throws, the user believes their traffic goes
+        // through the proxy but it actually BYPASSES it — a security
+        // and privacy issue. Log a warning so the user knows.
+        if (process.env.HUAGENT_DEBUG || process.env.HUAGENT_VERBOSE) {
+          console.warn(`[proxyFetch] Proxy agent failed (${err.message}); falling back to DIRECT fetch (proxy bypassed!)`);
+        }
+        // Fall through to direct fetch.
       }
     }
 

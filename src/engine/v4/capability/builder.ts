@@ -165,12 +165,18 @@ async function* executeNode<TIn, TOut>(
     }
     case "source": {
       // For source, we ignore the input and run the producer, emitting items.
-      // The producer's emit type is the same as the output type (TIn == TOut
-      // for source nodes by construction).
       const queue: TOut[] = [];
       let done = false;
+      let producerError: Error | null = null;
       const emit = (item: TOut) => { queue.push(item); return Promise.resolve(); };
-      const producerPromise = (node.produce as unknown as (emit: (item: TOut) => Promise<void>) => Promise<void>)(emit).then(() => { done = true; });
+      // CRITICAL FIX: attach .catch to the producer promise. Without it,
+      // a producer rejection leaves `done=false` forever, and the
+      // `while (!done || ...)` loop polls via setTimeout(1) indefinitely,
+      // hanging the async generator. Now we set `producerError` and
+      // `done=true` on rejection, then throw the error after the loop.
+      const producerPromise = (node.produce as unknown as (emit: (item: TOut) => Promise<void>) => Promise<void>)(emit)
+        .then(() => { done = true; })
+        .catch((err) => { producerError = err instanceof Error ? err : new Error(String(err)); done = true; });
       // Wait for items
       let lastSize = 0;
       while (!done || queue.length > lastSize) {
@@ -182,6 +188,8 @@ async function* executeNode<TIn, TOut>(
         }
       }
       await producerPromise;
+      // If the producer failed, propagate the error to the consumer.
+      if (producerError) throw producerError;
       break;
     }
   }

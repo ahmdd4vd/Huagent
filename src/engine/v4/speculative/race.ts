@@ -110,7 +110,7 @@ export async function race(config: RaceConfig): Promise<RaceResult> {
 
     await new Promise<void>((resolve) => {
       let resolved = false;
-      const finish = (reason: RaceResult["endReason"]) => {
+      let finish = (reason: RaceResult["endReason"]) => {
         if (resolved) return;
         resolved = true;
         endReason = reason;
@@ -155,10 +155,19 @@ export async function race(config: RaceConfig): Promise<RaceResult> {
         });
       });
 
-      // Budget watchdog
-      setTimeout(() => {
+      // Budget watchdog.
+      // BUGFIX: The previous code never cleared the timer, leaking a
+      // timer for `config.budgetMs` even if the race finished early.
+      // We now capture the timer id and clear it inside `finish()`.
+      const budgetTimer = setTimeout(() => {
         if (!resolved) finish("budget_exceeded");
       }, config.budgetMs);
+      // Override finish to also clear the budget timer.
+      const origFinish = finish;
+      finish = (reason) => {
+        clearTimeout(budgetTimer);
+        origFinish(reason);
+      };
     });
 
     // Collect all settled results

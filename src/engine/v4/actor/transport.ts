@@ -99,13 +99,22 @@ export class Transport {
 
     await this.send(address, { kind, payload, correlationId, replyTo: replyAddress });
 
-    // Wait for reply
+    // Wait for reply.
+    // BUGFIX: The previous code created a setTimeout that was never
+    // cleared — if the reply arrived before the timeout, the timer
+    // still held a reference for `timeout` ms (default 30s). With many
+    // concurrent requests this leaked timers. We now capture the timer
+    // id and clear it after the race resolves.
     const mailbox = this.mailboxes.get(replyAddress)!;
     const timeout = opts.timeoutMs ?? 30000;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
     const reply = await Promise.race([
       mailbox.pull(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeout)),
+      new Promise<null>((resolve) => {
+        timerId = setTimeout(() => resolve(null), timeout);
+      }),
     ]);
+    if (timerId) clearTimeout(timerId);
 
     // Cleanup reply mailbox
     this.mailboxes.delete(replyAddress);

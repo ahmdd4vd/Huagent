@@ -170,6 +170,9 @@ export function createTokenRouterProvider(model: string = "MiniMax-M3"): LLMProv
     name: "tokenrouter",
     model,
     async chat(messages) {
+      // BUGFIX: Added 30s timeout via AbortSignal. The previous code had
+      // no timeout — a slow/hanging API would block the entire ingest
+      // pipeline indefinitely.
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -181,6 +184,7 @@ export function createTokenRouterProvider(model: string = "MiniMax-M3"): LLMProv
           messages,
           temperature: 0.2,  // low for consistent extraction
         }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) {
         const errText = await res.text();
@@ -191,6 +195,7 @@ export function createTokenRouterProvider(model: string = "MiniMax-M3"): LLMProv
     },
     async generateText(prompt) {
       const t0 = Date.now();
+      // BUGFIX: Added 30s timeout.
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -202,6 +207,7 @@ export function createTokenRouterProvider(model: string = "MiniMax-M3"): LLMProv
           messages: [{ role: "user", content: prompt }],
           temperature: 0.2,
         }),
+        signal: AbortSignal.timeout(30_000),
       });
       if (!res.ok) {
         const errText = await res.text();

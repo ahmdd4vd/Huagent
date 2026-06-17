@@ -49,7 +49,12 @@ export const searchTool = {
       for (const entry of entries) {
         if (results.length >= maxResults) break;
 
-        if (entry.name.startsWith('.') && entry.name !== '.env') continue;
+        // SECURITY: Exclude all dotfiles (including .env, .npmrc, .aws,
+        // .ssh, etc.) from search results. The previous code had a
+        // special-case exception for `.env` which exposed secrets —
+        // search results would list `.env` files, which typically
+        // contain API keys and other credentials.
+        if (entry.name.startsWith('.')) continue;
         if (IGNORE_DIRS.has(entry.name)) continue;
 
         const fullPath = join(dir, entry.name);
@@ -78,9 +83,16 @@ export const searchTool = {
 };
 
 function globToRegex(glob: string): RegExp {
-  // Simple glob to regex conversion
-  let pattern = glob
-    .replace(/\./g, '\\.')
+  // Convert glob to regex. Escape ALL regex special chars first, THEN
+  // convert glob metachars (*, ?, [..]) back to regex syntax. The
+  // previous code only escaped `.` and converted `*`/`?`, so globs
+  // containing `+`, `(`, `)`, `[`, `]`, `{`, `}`, `^`, `$`, `|` produced
+  // wrong regexes (e.g. `*.ts` worked, but `test_(unit).ts` matched
+  // incorrectly or threw on invalid group syntax).
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  // Now convert glob-specific metachars. `*` → `.*`, `?` → `.`.
+  // (`[..]` is already a regex char class after escaping — keep it.)
+  const pattern = escaped
     .replace(/\*/g, '.*')
     .replace(/\?/g, '.');
   return new RegExp(`^${pattern}$`, 'i');

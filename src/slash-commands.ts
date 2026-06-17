@@ -817,7 +817,13 @@ function cmdVersion(_args: string[], ctx: SlashCommandContext): SlashCommandResu
  *        /effort auto      auto-detect from last user message
  */
 async function cmdEffort(args: string[], ctx: SlashCommandContext): Promise<SlashCommandResult> {
-  const current = ctx.onGetEffort ? ctx.onGetEffort() : (ctx.config.effort as string | undefined) || 'medium';
+  // BUGFIX: The previous code `ctx.onGetEffort ? ctx.onGetEffort() : ... || 'medium'`
+  // only applied the `|| 'medium'` fallback to the SECOND branch (when
+  // onGetEffort was undefined). If onGetEffort was defined but returned
+  // null/empty, the whole expression was empty — no fallback. Fix:
+  // apply the fallback uniformly with `??`/`||` regardless of which
+  // branch produced the value.
+  const current = ctx.onGetEffort?.() ?? (ctx.config.effort as string | undefined) ?? 'medium';
   const VALID = ['low', 'medium', 'high', 'xhigh', 'max', 'ultramax'];
 
   if (args.length === 0) {
@@ -892,9 +898,22 @@ function cmdResume(args: string[], ctx: SlashCommandContext): SlashCommandResult
   if (!session) {
     return { handled: true, message: `${fg(theme.danger, '✗ Session not found: ' + args[0])}` };
   }
+  // BUGFIX: JSON.stringify throws on circular references, and
+  // `.slice()` throws if `session.messages` is undefined. Wrap in
+  // try/catch so a corrupt session file doesn't crash the /resume
+  // command — show a fallback message instead.
+  let preview = '(no message preview available)';
+  try {
+    if (Array.isArray(session.messages)) {
+      const json = JSON.stringify(session.messages, null, 2);
+      preview = json.slice(0, 500) + (json.length > 500 ? '...' : '');
+    }
+  } catch {
+    // Circular reference or other JSON error — keep the fallback.
+  }
   return {
     handled: true,
-    message: `${mascots.smallHua} ${fg(theme.success, '✓ Loaded session: ' + session.id)} (${session.messages.length} messages)\n\n${fg(theme.fgDim, 'Note: messages will appear in next prompt')}\n${JSON.stringify(session.messages, null, 2).slice(0, 500)}...`,
+    message: `${mascots.smallHua} ${fg(theme.success, '✓ Loaded session: ' + session.id)} (${session.messages?.length ?? 0} messages)\n\n${fg(theme.fgDim, 'Note: messages will appear in next prompt')}\n${preview}`,
   };
 }
 

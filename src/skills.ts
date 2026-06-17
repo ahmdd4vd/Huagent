@@ -106,18 +106,29 @@ export class SkillRegistry {
 
   // Parse YAML frontmatter (simple, no deps)
   private parseFrontmatter(content: string): { frontmatter: Record<string, any>; body: string } {
-    const match = content.match(/^---\n([\s\S]+?)\n---\n([\s\S]+)$/);
+    // BUGFIX: Accept `\r?\n` line endings so Windows CRLF files match.
+    // The previous regex `^---\n` only matched LF, so files saved with
+    // CRLF (common on Windows) had their frontmatter treated as body.
+    const match = content.match(/^---\r?\n([\s\S]+?)\r?\n---\r?\n([\s\S]+)$/);
     if (!match) return { frontmatter: {}, body: content };
 
     const frontmatter: Record<string, any> = {};
-    const lines = match[1].split('\n');
+    const lines = match[1].split(/\r?\n/);
     for (const line of lines) {
       const m = line.match(/^(\w+):\s*(.*)$/);
       if (m) {
         const key = m[1];
         let value: any = m[2];
         if (value.startsWith('[') && value.endsWith(']')) {
-          value = value.slice(1, -1).split(',').map((s: string) => s.trim().replace(/^['"]|['"]$/g, ''));
+          // BUGFIX: `[]` → slice(1,-1) is '' → .split(',') is ['']
+          // which parsed as a 1-element array containing an empty
+          // string. Handle the empty-array case explicitly.
+          const inner = value.slice(1, -1).trim();
+          if (inner === '') {
+            value = [];
+          } else {
+            value = inner.split(',').map((s: string) => s.trim().replace(/^['"]|['"]$/g, ''));
+          }
         } else if (value.startsWith('"') || value.startsWith("'")) {
           value = value.slice(1, -1);
         }

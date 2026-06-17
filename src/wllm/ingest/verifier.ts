@@ -237,10 +237,17 @@ export async function verify(
     const arbiterResult = await provider.generateText(arbiterPrompt);
     arbiterVerdict = parseCriticResponse("correctness", arbiterResult.text, arbiterResult.tokensUsed, Date.now() - t0a);
     arbiterVerdict.persona = "correctness";  // mark as arbiter
-    // Override aggregation with arbiter
+    // Override aggregation with arbiter.
+    // BUGFIX: confidenceLevel was derived from `agg.score` (the
+    // aggregated critic score) but `score` is `arbiterVerdict.score`.
+    // If the arbiter scored 0.3 but critics aggregated 0.8, the result
+    // reported `confidenceLevel: "INFERRED"` with `score: 0.3` —
+    // internally inconsistent. Now derive confidenceLevel from the
+    // ARBITER's score so they match.
+    const arbiterScore = arbiterVerdict.score;
     return {
-      confidenceLevel: agg.score >= 0.95 ? "VERIFIED" : agg.score >= 0.7 ? "INFERRED" : agg.score >= 0.4 ? "ASSUMED" : "CONTRADICTED",
-      score: arbiterVerdict.score,
+      confidenceLevel: arbiterScore >= 0.95 ? "VERIFIED" : arbiterScore >= 0.7 ? "INFERRED" : arbiterScore >= 0.4 ? "ASSUMED" : "CONTRADICTED",
+      score: arbiterScore,
       confidence: arbiterVerdict.confidence,
       critics,
       arbiterTriggered,

@@ -365,9 +365,19 @@ export class IngestCacheStore {
     absPaths: string[],
     mode: CacheMode = "raw"
   ): Promise<Map<string, CacheLookup>> {
+    // BUGFIX: Previously this looped sequentially with `await` inside a
+    // for-of, serializing all disk I/O (file reads + hashing). For a
+    // 1000-file project this meant 1000 sequential file reads. We now
+    // parallelize with a concurrency limit of 32 (enough to keep the
+    // disk busy without overwhelming the file descriptor table).
     const out = new Map<string, CacheLookup>();
-    for (const p of absPaths) {
-      out.set(p, await this.lookup(p, mode));
+    const CONCURRENCY = 32;
+    for (let i = 0; i < absPaths.length; i += CONCURRENCY) {
+      const batch = absPaths.slice(i, i + CONCURRENCY);
+      const entries = await Promise.all(
+        batch.map(async (p) => [p, await this.lookup(p, mode)] as const),
+      );
+      for (const [p, lookup] of entries) out.set(p, lookup);
     }
     return out;
   }

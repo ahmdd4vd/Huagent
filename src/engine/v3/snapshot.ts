@@ -41,9 +41,17 @@ export class SnapshotManager {
       timestamp: Date.now(),
     };
 
+    // BUGFIX: Map.set on an existing key preserves insertion order, so
+    // re-snapshotting a file doesn't move it to the "most recently used"
+    // position — it stays at its original insertion point and gets
+    // evicted too early (FIFO, not LRU). Delete-then-set to refresh
+    // the insertion order.
+    if (this.snapshots.has(path)) {
+      this.snapshots.delete(path);
+    }
     this.snapshots.set(path, snap);
 
-    // LRU bound
+    // LRU bound — evict the oldest (least recently used) entry.
     if (this.snapshots.size > this.maxSnapshots) {
       const firstKey = this.snapshots.keys().next().value;
       if (firstKey) this.snapshots.delete(firstKey);

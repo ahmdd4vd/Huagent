@@ -142,16 +142,30 @@ function yamlEscape(s: string): string {
 /**
  * Export all pages from a WikiStore to markdown files.
  * Returns the list of files written.
+ *
+ * BUGFIX: Previously this looped sequentially with `await` inside a
+ * for-of, serializing disk writes for every page. For wikis with
+ * hundreds of pages this was noticeably slow. We now write in parallel
+ * with a concurrency limit of 10 to avoid overwhelming the filesystem.
  */
 export async function exportAllPages(store: WikiStore, wikiRoot: string): Promise<{ written: number; paths: string[] }> {
   const pages = await store.listAll();
+  const CONCURRENCY = 10;
   const paths: string[] = [];
 
-  for (const page of pages) {
-    const relPath = pageToFilePath(page.pageType, page.label, page.episodeDate ?? page.decisionDate);
-    const fullPath = join(wikiRoot, relPath);
-    await writePageMarkdown(page, fullPath);
-    paths.push(fullPath);
+  // Process in batches of CONCURRENCY to avoid opening too many file
+  // handles at once.
+  for (let i = 0; i < pages.length; i += CONCURRENCY) {
+    const batch = pages.slice(i, i + CONCURRENCY);
+    const batchPaths = await Promise.all(
+      batch.map(async (page) => {
+        const relPath = pageToFilePath(page.pageType, page.label, page.episodeDate ?? page.decisionDate);
+        const fullPath = join(wikiRoot, relPath);
+        await writePageMarkdown(page, fullPath);
+        return fullPath;
+      }),
+    );
+    paths.push(...batchPaths);
   }
 
   return { written: paths.length, paths };

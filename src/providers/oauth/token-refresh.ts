@@ -48,7 +48,13 @@ export async function refreshGoogleToken(
       accessToken: access_token,
       expiresAt: new Date(Date.now() + (expires_in ?? 3600) * 1000).toISOString(),
     };
-  } catch {
+  } catch (err) {
+    // BUGFIX: empty catch silently swallowed network/parse errors,
+    // making OAuth debugging impossible. Log at debug level so users
+    // can troubleshoot with HUAGENT_DEBUG=1.
+    if (process.env.HUAGENT_DEBUG) {
+      console.warn('[oauth] refreshGoogleToken failed:', (err as Error).message);
+    }
     return null;
   }
 }
@@ -81,7 +87,8 @@ export async function refreshGitHubToken(
       expiresAt: new Date(Date.now() + (data.expires_in ?? 28800) * 1000).toISOString(),
       refreshToken: data.refresh_token, // GitHub rotates refresh tokens
     };
-  } catch {
+  } catch (err) {
+    if (process.env.HUAGENT_DEBUG) console.warn("[oauth] refresh failed:", (err as Error).message);
     return null;
   }
 }
@@ -108,7 +115,8 @@ export async function refreshClaudeToken(
       accessToken: data.access_token,
       expiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString(),
     };
-  } catch {
+  } catch (err) {
+    if (process.env.HUAGENT_DEBUG) console.warn("[oauth] refresh failed:", (err as Error).message);
     return null;
   }
 }
@@ -140,7 +148,8 @@ export async function refreshAccessToken(
       accessToken: data.access_token,
       expiresAt: new Date(Date.now() + (data.expires_in ?? 3600) * 1000).toISOString(),
     };
-  } catch {
+  } catch (err) {
+    if (process.env.HUAGENT_DEBUG) console.warn("[oauth] refresh failed:", (err as Error).message);
     return null;
   }
 }
@@ -191,17 +200,34 @@ export async function getValidToken(
     return cached.accessToken;
   }
 
-  // 3. Need refresh — use lock to prevent concurrent refresh
+  // 3. Need refresh — use lock to prevent concurrent refresh.
+  // BUGFIX: The previous code created the promise FIRST, then set the
+  // lock AFTER. Between the `refreshLocks.get()` check at line 197 and
+  // the `refreshLocks.set()` at line 254, another caller could check
+  // the lock, find it empty, and start a duplicate refresh. We now
+  // create a placeholder promise synchronously and set the lock BEFORE
+  // starting the async work, so concurrent callers see the lock immediately.
   const lockKey = provider;
   const existing = refreshLocks.get(lockKey);
   if (existing) return existing;
 
-  const refreshPromise = (async () => {
+  // Create a controller promise we can resolve from the async IIFE.
+  let resolveRefresh!: (value: string | null) => void;
+  let rejectRefresh!: (err: Error) => void;
+  const refreshPromise = new Promise<string | null>((resolve, reject) => {
+    resolveRefresh = resolve;
+    rejectRefresh = reject;
+  });
+  // Set the lock IMMEDIATELY (before any await) so concurrent callers
+  // see it and deduplicate.
+  refreshLocks.set(lockKey, refreshPromise);
+
+  // Kick off the actual refresh work in the background.
+  (async () => {
     try {
       let result: { accessToken: string; expiresAt: string } | null = null;
 
       if (credentials.refreshToken) {
-        // Provider-specific refresh
         switch (provider) {
           case 'gemini':
           case 'gemini-cli':
@@ -241,17 +267,19 @@ export async function getValidToken(
       if (result) {
         const expiresMs = new Date(result.expiresAt).getTime();
         tokenCache.set(provider, { accessToken: result.accessToken, expiresAt: expiresMs });
-        return result.accessToken;
+        resolveRefresh(result.accessToken);
+        return;
       }
 
       // Fallback to apiKey if no refresh worked
-      return credentials.apiKey || credentials.accessToken || null;
+      resolveRefresh(credentials.apiKey || credentials.accessToken || null);
+    } catch (err) {
+      rejectRefresh(err);
     } finally {
       refreshLocks.delete(lockKey);
     }
   })();
 
-  refreshLocks.set(lockKey, refreshPromise);
   return refreshPromise;
 }
 

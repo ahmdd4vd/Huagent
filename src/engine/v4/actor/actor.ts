@@ -227,6 +227,14 @@ export class Actor<S = unknown> {
     }
     this.stats.startedAt = Date.now();
     this.stats.alive = true;
+
+    // CRITICAL FIX: restart the message-processing loop. The previous
+    // code reset `crashed=false` and `alive=true` but never called
+    // `startLoop()`. The original loop had exited (because crashed=true),
+    // so after restart the actor was marked alive with no loop running —
+    // messages queued in the mailbox were never delivered to the handler.
+    this.startLoop();
+
     return true;
   }
 }

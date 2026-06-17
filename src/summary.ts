@@ -58,6 +58,15 @@ export function compressSummary(input: string, budget: CompressionBudget = DEFAU
   const omittedLines = uniqueLines.length - selected.length;
   let summary = selected.join('\n');
 
+  // Track whether we actually truncated content. The previous code used
+  // `summary.length < originalChars`, which is WRONG: appending
+  // "... (N more lines omitted)" can make summary LONGER than the
+  // original (e.g. for a 50-char input with 30 omitted lines), so
+  // `truncated` was false even though truncation happened.
+  const didTruncate = omittedLines > 0 || removedDuplicates > 0 ||
+    selected.some((line, i) => line !== uniqueLines[i]) ||
+    selected.length < uniqueLines.length;
+
   if (omittedLines > 0) {
     summary += `\n... (${omittedLines} more lines omitted)`;
   }
@@ -70,7 +79,7 @@ export function compressSummary(input: string, budget: CompressionBudget = DEFAU
     compressedLines: selected.length,
     removedDuplicates,
     omittedLines,
-    truncated: summary.length < originalChars,
+    truncated: didTruncate,
   };
 }
 

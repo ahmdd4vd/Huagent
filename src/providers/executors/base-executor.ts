@@ -155,32 +155,63 @@ export class BaseExecutor {
       // Connection timeout
       const connectCtrl = new AbortController();
       const timer = setTimeout(() => connectCtrl.abort(new Error('connect timeout')), timeoutMs);
-      const mergedSignal = signal
-        ? AbortSignal.any([signal, connectCtrl.signal])
-        : connectCtrl.signal;
+      // BUGFIX: AbortSignal.any is Node 20+ only. Use a manual
+      // listener-based combination for Node 18 compat.
+      const mergedSignal = combineSignals([signal, connectCtrl.signal]);
 
       try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(transformedBody),
-          signal: mergedSignal,
-        });
-        clearTimeout(timer);
+        // BUGFIX: The previous "retry" logic was broken. It only moved
+        // to the NEXT URL on retryable status — it never retried the
+        // SAME URL. With a single base URL (the common case), no retry
+        // happened at all. We now implement a real per-URL retry loop
+        // using exponential backoff.
+        const maxAttempts = 3;
+        const retryDelayMs = 1000;
 
-        // Retry on rate limit / server error
-        const retryEntry = retryConfig[response.status];
-        if (retryEntry && urlIndex < baseUrls.length - 1) {
-          lastError = new Error(`HTTP ${response.status}`);
-          continue; // try next URL
+        let lastResponse: Response | null = null;
+        let attempt = 0;
+        while (attempt < maxAttempts) {
+          try {
+            const response = await fetch(url, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(transformedBody),
+              signal: mergedSignal,
+            });
+            clearTimeout(timer);
+
+            // Check if this status is retryable.
+            const statusRetry = retryConfig[response.status];
+            if (statusRetry && attempt < maxAttempts - 1) {
+              // Retry the SAME URL after a delay.
+              await new Promise((r) => setTimeout(r, statusRetry.delayMs ?? retryDelayMs));
+              attempt++;
+              lastResponse = response; // keep for fallback
+              continue;
+            }
+            return { response, url, headers };
+          } catch (err: any) {
+            clearTimeout(timer);
+            // Network error — retry the same URL if attempts remain.
+            if (attempt < maxAttempts - 1) {
+              await new Promise((r) => setTimeout(r, retryDelayMs * Math.pow(2, attempt)));
+              attempt++;
+              lastError = err;
+              continue;
+            }
+            // Out of retries — try next base URL if available.
+            lastError = err;
+            break;
+          }
         }
-
-        return { response, url, headers };
+        // If we got here with a lastResponse, return it (best effort).
+        if (lastResponse) return { response: lastResponse, url, headers };
+        // Otherwise fall through to next base URL.
+        if (urlIndex + 1 < baseUrls.length) continue;
+        throw lastError || new Error(`URL ${url} failed`);
       } catch (err: any) {
         clearTimeout(timer);
         lastError = err;
-
-        // Try next URL on network error
         if (urlIndex + 1 < baseUrls.length) continue;
         throw err;
       }
@@ -191,3 +222,26 @@ export class BaseExecutor {
 }
 
 export default BaseExecutor;
+
+/**
+ * Combine multiple AbortSignals into one. Uses AbortSignal.any when
+ * available (Node 20+); falls back to a manual listener-based
+ * implementation for Node 18 compatibility.
+ */
+function combineSignals(signals: (AbortSignal | undefined)[]): AbortSignal {
+  const valid = signals.filter((s): s is AbortSignal => s !== undefined);
+  if (valid.length === 0) return new AbortController().signal;
+  if (valid.length === 1) return valid[0];
+  const anyFn = (AbortSignal as any).any;
+  if (typeof anyFn === 'function') return anyFn(valid);
+  // Node 18 fallback.
+  const controller = new AbortController();
+  for (const s of valid) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      break;
+    }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}

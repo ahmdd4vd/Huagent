@@ -14,6 +14,16 @@ import type { WikiPage, PageType, ConfidenceLevel, MemorySystem, QueryIntent } f
 import type { MemoryEntry } from '../types/index.js';
 
 export class WikiMemory {
+  /**
+   * Optional error handler invoked when an async page creation fails.
+   * Without this, errors from recordEpisode/saveProjectFact/recordPattern
+   * are only logged to console.error — the caller never knows.
+   *
+   * Set this to surface failures upstream (e.g. via a toast in the TUI
+   * or a retry mechanism).
+   */
+  onError?: (err: Error, method: string, context?: Record<string, unknown>) => void;
+
   constructor(private wikiStore: WikiStore) {}
 
   /**
@@ -54,6 +64,7 @@ export class WikiMemory {
     
     this.wikiStore.createPage(opts).catch(err => {
       console.error('[WikiMemory] Failed to record episode:', err);
+      this.onError?.(err as Error, 'recordEpisode', { content: content.slice(0, 100) });
     });
 
     return id;
@@ -74,6 +85,7 @@ export class WikiMemory {
 
     this.wikiStore.createPage(opts).catch(err => {
       console.error('[WikiMemory] Failed to save project fact:', err);
+      this.onError?.(err as Error, 'saveProjectFact', { key });
     });
   }
 
@@ -100,6 +112,7 @@ export class WikiMemory {
 
     this.wikiStore.createPage(opts).catch(err => {
       console.error('[WikiMemory] Failed to record pattern:', err);
+      this.onError?.(err as Error, 'recordPattern', { name });
     });
   }
 

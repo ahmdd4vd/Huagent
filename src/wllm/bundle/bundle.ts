@@ -496,7 +496,12 @@ export async function writeBundle(
 
   return {
     bytes: stat.size,
-    entryCount: 3 + (contents.readme ? 1 : 0) + contents.pages.length,
+    // BUGFIX: entryCount was `3 + (readme ? 1 : 0) + pages.length`,
+    // but the actual entry count is manifest (1) + pages.json (1) +
+    // README (1 if present) + pages (N). The constant should be 2
+    // (manifest + pages.json), not 3. README is already counted by the
+    // ternary. With `3`, the count was inflated by 1.
+    entryCount: 2 + (contents.readme ? 1 : 0) + contents.pages.length,
   };
 }
 
@@ -699,7 +704,22 @@ export async function readBundle(
             return;
           }
           const chunks: Buffer[] = [];
-          stream.on("data", (c: Buffer) => chunks.push(c));
+          // SECURITY (ZIP-bomb): track ACTUAL bytes read, not just the
+          // reported uncompressedSize from the ZIP central directory.
+          // A malicious archive can report uncompressedSize=0 while
+          // delivering huge data via the stream, bypassing the size
+          // check above. We accumulate actual bytes and reject if the
+          // running total exceeds MAX_ENTRY_SIZE.
+          let actualEntrySize = 0;
+          stream.on("data", (c: Buffer) => {
+            actualEntrySize += c.length;
+            if (actualEntrySize > MAX_ENTRY_SIZE) {
+              reject(new Error(`Entry ${name} exceeded MAX_ENTRY_SIZE during decompression (${actualEntrySize} > ${MAX_ENTRY_SIZE})`));
+              stream.destroy();  // stop reading
+              return;
+            }
+            chunks.push(c);
+          });
           stream.on("end", () => {
             const buf = Buffer.concat(chunks);
             if (name === MANIFEST_FILENAME) {

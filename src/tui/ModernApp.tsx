@@ -140,13 +140,27 @@ export const ModernApp: React.FC<ModernAppProps> = ({
   autonomousRef.current = autonomous;
 
   // ── Toast helper ─────────────────────────────────────────────
+  // Track toast timer ids so we can clear them on unmount — otherwise
+  // they fire setToasts on an unmounted component (React warning + leak).
+  const toastTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    // Cleanup all pending toast timers on unmount.
+    return () => {
+      for (const t of toastTimersRef.current) clearTimeout(t);
+      toastTimersRef.current.clear();
+    };
+  }, []);
+
   const pushToast = useCallback((level: ToastItem['level'], message: string) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setToasts((t) => [...t.slice(-3), { id, level, message, createdAt: Date.now() }]);
-    // Auto-dismiss after 5s
-    setTimeout(() => {
+    // Auto-dismiss after 5s. Track the timer so it can be cleared on unmount.
+    const timer = setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id));
+      toastTimersRef.current.delete(timer);
     }, 5000);
+    toastTimersRef.current.add(timer);
   }, []);
 
   // ── Stats update ─────────────────────────────────────────────

@@ -335,8 +335,15 @@ function parseYamlValue(value: string): any {
   if (value === "null" || value === "~") return null;
   if (/^-?\d+$/.test(value)) return parseInt(value, 10);
   if (/^-?\d+\.\d+$/.test(value)) return parseFloat(value);
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
+  if ((value.startsWith('"') && value.endsWith('"'))) {
+    // BUGFIX: Unescape `\"` → `"` and `\\` → `\` inside double-quoted
+    // strings. The previous code only stripped the outer quotes, so
+    // `\"hello\"` round-tripped as `\"hello\"` (literal backslashes).
+    return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    // Single-quoted YAML: '' is the only escape (represents a literal ').
+    return value.slice(1, -1).replace(/''/g, "'");
   }
   return value;
 }
@@ -386,7 +393,12 @@ export function manifestToYaml(m: WikiManifest): string {
 
 function yamlStr(s: string): string {
   if (/[:#\[\]{}|>&*!%@`,]/.test(s) || s.startsWith("-") || s.startsWith("?") || s.includes("\n") || s !== s.trim()) {
-    return `"${s.replace(/"/g, '\\"')}"`;
+    // BUGFIX: Escape `\` → `\\` BEFORE `"` → `\"`. The previous order
+    // (`"` → `\"` first) caused `\"` to become `\\"` (literal backslash
+    // + quote) which YAML parsers misread. Correct order: backslash
+    // first, then quote.
+    const escaped = s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+    return `"${escaped}"`;
   }
   return s;
 }

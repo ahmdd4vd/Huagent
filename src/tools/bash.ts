@@ -61,7 +61,10 @@ export const bashTool = {
         command: args.command,
         stdout: err.stdout?.slice(0, MAX_OUTPUT) || '',
         stderr: err.stderr?.slice(0, MAX_OUTPUT) || err.message,
-        exitCode: err.code || 1,
+        // `err.code` from exec can be a string like 'ENOENT' (command not
+        // found) or a number (exit code). Use a numeric default of 1 when
+        // it's not a valid exit code number.
+        exitCode: typeof err.code === 'number' ? err.code : 1,
         timedOut: err.killed && err.signal === 'SIGTERM',
       };
     }

@@ -131,8 +131,13 @@ export class SqliteGraphStore implements GraphStore {
     );
     // Update FTS (only if FTS5 is available — otherwise this is a no-op
     // and search falls back to LIKE).
+    // BUGFIX: Delete the old FTS row before inserting a new one. The
+    // previous code always INSERT'd, creating duplicate FTS rows for
+    // the same node_id when updateNode() calls insertNode() for a new
+    // version. This caused search() to return duplicate results.
     if (this.ftsAvailable) {
       try {
+        this.db.prepare(`DELETE FROM nodes_fts WHERE node_id = ?`).run(n.id);
         const fts = this.db.prepare(`
           INSERT INTO nodes_fts (node_id, label, body) VALUES (?, ?, ?)
         `);

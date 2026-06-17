@@ -2,7 +2,7 @@
 // output categorization, and command classification
 // Inspired by OpenClaude BashTool.tsx (1180 LOC) and claw-code bash_validation
 
-import { exec, spawn } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { classifyBashCommand, describeIntent, type CommandIntent } from '../../permissions.js';
 import { stat } from 'node:fs/promises';
@@ -100,8 +100,13 @@ Examples:
       };
     } catch (err: any) {
       const duration = Date.now() - start;
-      const exitCode = err.code || 1;
-      const cmdBase = args.command.trim().split(/\s+/)[0];
+      // `err.code` from exec can be a string ('ENOENT') or a number (exit
+      // code). Use a numeric default of 1 when not a valid exit code.
+      const exitCode = typeof err.code === 'number' ? err.code : 1;
+      // Strip leading `sudo`/`env` so COMMAND_SEMANTICS lookup matches the
+      // actual command (e.g. `sudo grep` → cmdBase = 'grep').
+      const trimmed = args.command.trim().replace(/^(sudo|env)\s+/, '');
+      const cmdBase = trimmed.split(/\s+/)[0];
       const semantic = COMMAND_SEMANTICS[cmdBase]?.(exitCode);
 
       return {

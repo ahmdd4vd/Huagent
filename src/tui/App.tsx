@@ -148,7 +148,10 @@ export const App: React.FC<AppProps> = ({ engine, client, memory, tools, session
       content: userMsg,
       timestamp: Date.now(),
     };
-    setMessages((msgs) => [...messages, userMessage]);
+    // BUGFIX: use the updater argument `msgs` instead of the closure
+    // `messages` — the closure may be stale if state changed between
+    // renders, causing messages to be lost.
+    setMessages((msgs) => [...msgs, userMessage]);
 
     try {
       setIsStreaming(true);

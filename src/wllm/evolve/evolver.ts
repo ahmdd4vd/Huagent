@@ -319,7 +319,9 @@ export class Evolver {
   findStalePages(pages: WikiPage[], staleDays: number): RefreshSuggestion[] {
     const refreshes: RefreshSuggestion[] = [];
     const now = Date.now();
-    const staleMs = staleDays * 24 * 60 * 60 * 1000;
+    // BUGFIX: `staleMs` was computed but never used (the logic below
+    // uses `daysSinceCheck > staleDays` instead). Removed the dead
+    // variable to avoid confusion.
 
     for (const p of pages) {
       const staleness = p.freshness?.staleness ?? "MEDIUM";

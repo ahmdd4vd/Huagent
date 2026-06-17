@@ -362,8 +362,16 @@ export class ContentAnalyzer {
       if (/\b(if|else|for|while|switch|case)\b/.test(line)) {
         complexity++;
       }
-      // Count nested functions
-      if (/\b(function|=>)\b/.test(line) && /\b(function|=>)\b/.test(line.split('//')[0])) {
+      // Count nested functions.
+      // BUGFIX: The previous regex `/\b(function|=>)\b/` used `\b` word
+      // boundaries around `=>`. But `=` and `>` are non-word chars, so
+      // `\b=>\b` only matches when `=` is preceded by a word char AND `>`
+      // is followed by a word char (rare). Arrow functions like `x => x`
+      // were systematically undercounted. Fix: split into two checks —
+      // `\bfunction\b` for function declarations and a bare `=>` check
+      // (no word boundaries) for arrow functions.
+      const codePart = line.split('//')[0]; // ignore line comments
+      if (/\bfunction\b/.test(codePart) || codePart.includes('=>')) {
         complexity++;
       }
     }

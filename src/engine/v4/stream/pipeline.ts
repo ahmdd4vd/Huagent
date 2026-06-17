@@ -41,7 +41,13 @@ export type BackpressureStrategy = "block" | "drop_old" | "drop_new" | "error";
  */
 export class BoundedQueue<T> {
   private items: T[] = [];
-  private waiters: Array<(item: T | null) => void> = [];
+  // CRITICAL FIX: separate consumer-waiters (pull waiting for items) from
+  // producer-waiters (push waiting for space). The previous code used a
+  // single `waiters` array for both, which caused deadlocks and data loss:
+  // when pull() shifted an item, it never notified the producer-waiter that
+  // space was now available. The producer hung forever and its item was lost.
+  private consumerWaiters: Array<(item: T | null) => void> = [];
+  private producerWaiters: Array<() => void> = [];
   private closed = false;
 
   constructor(
@@ -64,30 +70,25 @@ export class BoundedQueue<T> {
     if (this.closed) {
       throw new Error("BoundedQueue: push on closed queue");
     }
+    // If there's a consumer waiting, deliver directly.
+    const cw = this.consumerWaiters.shift();
+    if (cw) {
+      cw(item);
+      return true;
+    }
     if (this.items.length < this.capacity) {
-      // Try to deliver to a waiter first
-      const w = this.waiters.shift();
-      if (w) {
-        w(item);
-        return true;
-      }
       this.items.push(item);
       return true;
     }
     switch (this.strategy) {
       case "block":
-        // Wait for a pull before pushing
+        // Wait for a pull to free up space. The producer-waiter is called
+        // by pull() when an item is shifted (making room).
         await new Promise<void>((resolve) => {
-          this.waiters.push((it) => {
-            if (it === null) {
-              resolve(); // closed while waiting
-              return;
-            }
-            // Waiter got our item directly
-            resolve();
-          });
+          this.producerWaiters.push(resolve);
         });
         if (this.closed) return false;
+        // Space is now available — push our item.
         this.items.push(item);
         return true;
       case "drop_old":
@@ -106,13 +107,20 @@ export class BoundedQueue<T> {
    */
   async pull(signal?: AbortSignal): Promise<T | null> {
     if (this.items.length > 0) {
-      return this.items.shift()!;
+      const item = this.items.shift()!;
+      // CRITICAL FIX: after shifting an item, notify a producer-waiter
+      // that space is now available. The producer will push its item
+      // into items[], which the NEXT pull() will pick up.
+      const pw = this.producerWaiters.shift();
+      if (pw) pw();
+      return item;
     }
     if (this.closed) return null;
+    // No items available — wait for a push.
     return new Promise<T | null>((resolve) => {
       const abort = () => {
-        const idx = this.waiters.findIndex((w) => w === waiter);
-        if (idx >= 0) this.waiters.splice(idx, 1);
+        const idx = this.consumerWaiters.findIndex((w) => w === waiter);
+        if (idx >= 0) this.consumerWaiters.splice(idx, 1);
         resolve(null);
       };
       const waiter = (item: T | null) => resolve(item);
@@ -123,14 +131,18 @@ export class BoundedQueue<T> {
         }
         signal.addEventListener("abort", abort, { once: true });
       }
-      this.waiters.push(waiter);
+      this.consumerWaiters.push(waiter);
     });
   }
 
   close(): void {
     this.closed = true;
-    for (const w of this.waiters) w(null);
-    this.waiters = [];
+    // Notify all consumer-waiters with null (signals closed).
+    for (const w of this.consumerWaiters) w(null);
+    this.consumerWaiters = [];
+    // Notify all producer-waiters (they'll check `this.closed` and return false).
+    for (const w of this.producerWaiters) w();
+    this.producerWaiters = [];
   }
 
   /**
