@@ -1,0 +1,47 @@
+# .npmignore — exclude dev-only files from npm package
+# The `files` field in package.json already whitelists what gets published,
+# but this .npmignore provides a second layer of defense.
+
+# Source code (only dist/ is needed at runtime)
+src/
+tests/
+scripts/
+research/
+docs/
+skills/
+
+# Config files (not needed at runtime)
+vitest.config.ts
+tsconfig.json
+.prettierrc
+eslint.config.mjs
+bunfig.toml
+flake.nix
+flake.lock
+
+# Git
+.git/
+.gitignore
+.github/
+
+# CI / IDE
+.editorconfig
+.gitattributes
+
+# Misc
+*.md
+!README.md
+!CHANGELOG.md
+!LICENSE
+!SECURITY.md
+AGENTS.md
+MINDSET.md
+postgres-panduan.wllmwiki
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+huagent-test-export.md
+*.tmp

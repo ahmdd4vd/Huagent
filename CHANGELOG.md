@@ -5,6 +5,114 @@ All notable changes to Huagent are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - 2026-06-17 — "OpenCode-Inspired TUI + Security Overhaul"
+
+> **Major TUI overhaul, 72 bug fixes, and comprehensive security hardening.** This release transforms the TUI to match OpenCode's design language, fixes critical security vulnerabilities, and hardens the engine against production crashes.
+
+### ✨ Added
+
+#### OpenCode-Inspired TUI
+- **New TUI component system** (`src/tui/oc/`) — theme, border, MessageList, Prompt, Footer, Dialog, Picker
+- **OpenCodeApp** — production TUI replacing ModernApp, with left-border prompt and minimal aesthetic
+- **12-step grayscale palette** — ported from OpenCode's `opencode.json` theme
+- **SplitBorder / LeftBorder / TopBorder / BottomBorder** — single-side border styles for OpenCode look
+- **Braille spinners** (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) for thinking/writing states
+- **Multi-line input** — Alt+Enter / Shift+Enter inserts newline
+- **Emacs editing keys** — Ctrl+A/E (line start/end), Ctrl+U/K (delete to start/end), Ctrl+W (delete word)
+- **History navigation** — ↑↓ through previous prompts
+- **Slash command autocomplete** — type `/mod` → get `/model`, `/models`, `/modes`
+- **Global shortcuts** — Ctrl+P (provider), Ctrl+T (model), Ctrl+E (scope), Ctrl+R (resume), Ctrl+L (clear), ? (help)
+- **Tool call badges** — inline status (✓ success, ✗ error, ⠋ running) with duration
+- **Footer status bar** — directory, LSP/MCP counts, /status hint
+- **Responsive layout** — adapts to terminal width AND height
+- **Help dialog** — full keybinding list, dismissible with Enter/Esc/?
+
+#### Security Hardening
+- **SSRF protection** in `web` tool — blocks private IPs, loopback, cloud metadata, link-local
+- **Path traversal guards** — session ids validated against `^[A-Za-z0-9_-]+$`, /export filenames checked
+- **Shell injection prevention** — `grep` and `hooks` switched from `exec()` to `execFile()` with arg arrays
+- **Default-deny permissions** — unknown tools denied by default in `workspace-write` mode
+- **OAuth secret hardening** — Google OAuth secrets support env override
+- **ZIP-bomb protection** — bundle reader tracks actual decompressed bytes
+- **Error handler shell-escape** — filenames in error suggestions properly shell-escaped
+
+#### Testing
+- **239 tests** (up from 120) — added 119 new tests across 5 new test files
+- **52 OpenCode TUI tests** — theme, borders, MessageList, Prompt, Picker, Dialog
+- **16 keyboard interaction tests** — Enter, Esc, Tab, Ctrl+C/U/W/K, Alt+Enter, arrows
+- **8 global shortcut tests** — Ctrl+P/T/E/L, ?, stats, footer
+- **25 security regression tests** — SSRF, path traversal, LRU, dialog reset, limit:0
+
+### 🐛 Fixed (72 bugs total)
+
+#### Critical Security (10 bugs)
+- `sessions.ts` — Path traversal via unvalidated session id
+- `tools/grep.ts` — Shell injection via pattern (backticks/command substitution)
+- `tools/web.ts` — SSRF (localhost, cloud metadata, private IPs)
+- `tui/error-handler.tsx` — Shell injection in error suggestions
+- `hooks.ts` — Command injection in .sh hook execution
+- `slash-commands.ts /export` — Path traversal via filename
+- `permissions.ts` — Default-allow for unknown tools (auto-allowed new tools)
+- `providers/client.ts` — Anthropic multi-tool streaming broken (lost all but last tool_use)
+- `tui/dialog-controller.ts` — resetDialogController abandoned pending promises (engine hung)
+- `llm/client.ts` — Anthropic tool_use yielded with empty args (ignored input_json_delta)
+
+#### Critical Correctness (6 bugs)
+- `engine/planner.ts` — depends_on off-by-one (LLM 1-indexed vs array 0-indexed)
+- `engine/v4/stream/pipeline.ts` — BoundedQueue deadlock + data loss (shared waiters array)
+- `engine/v4/actor/actor.ts` — Actor.restart() zombie state (never called startLoop)
+- `engine/v4/capability/builder.ts` — Source node hangs on producer reject (no .catch)
+- `providers/client.ts` — OpenAI tool calls lost on stream end (only flushed on finish_reason)
+- `llm/client.ts` — OpenAI usage never recorded (always 0, usage chunk after finish_reason)
+
+#### High Correctness (12 bugs)
+- `engine/core.ts` — Double-counting refinements in stats (2N instead of N)
+- `wllm/lint/scheduler.ts` — Unhandled promise rejections crash process
+- `wllm/graph/wiki-store.ts` — deletePage didn't delete (empty version left in history)
+- `engine/v4/graph/sqlite-store.ts` — clear() crashes if FTS5 unavailable
+- `engine/v4/graph/sqlite-store.ts` — FTS duplicates on updateNode (no DELETE before INSERT)
+- `cache.ts` — LRU broken on overwrite (Map.set preserves insertion order)
+- `memory/store.ts` — `limit:0` returned 10 results (|| instead of ??)
+- `memory/store.ts` — Float32Array reads past BLOB end (no byteOffset/byteLength)
+- `agents/subagent.ts` — Unbounded history + cancel race (cancelled→completed overwrite)
+- `wllm/ingest/verifier.ts` — confidenceLevel/score mismatch on arbiter trigger
+- `wllm/lint/linter.ts` — info issues counted as pass (inflated lint grade)
+- `wllm/ingest/content-analyzer.ts` — Broken `\b=>\b` regex (arrow functions undercounted)
+
+#### Medium (19 bugs)
+- Resource leaks: auto-ingest safety timer, lint scheduler history, speculative race budget timer, actor transport request timer
+- Sequential awaits parallelized: markdown-export, ingest cache lookupMany
+- Missing timeouts: semantic-extractor fetch calls
+- Type coercion: bash exitCode (string vs number), slash-commands effort fallback
+- Dead code: evolver staleMs, advanced/bash dead spawn import
+- Windows compat: skills.ts CRLF frontmatter, utils/paths.ts isAbsolute
+- Logic bugs: summary.ts truncated flag, question-prompt.tsx allowCustom inverted, loading-states division by zero
+
+#### Low (25 bugs)
+- Empty catch blocks → added debug logging (oauth token-refresh, proxy-fetch)
+- Race conditions → fixed (oauth refresh lock, subagent cancel)
+- Node 18 compat → AbortSignal.any polyfills (proxy-fetch, base-executor)
+- Broken retry logic → base-executor now retries same URL with backoff
+- Dead ternaries, redundant checks, off-by-ones across engine/v3, tools, providers
+
+### 🔧 Changed
+- **Default TUI** is now `OpenCodeApp` (was `ModernApp`) — OpenCode-inspired design
+- **REPL mode** (`--no-tui`) overhauled — no banner, minimal header, braille spinner
+- **package.json** — added `homepage`, `repository`, `bugs`, `exports`, `prepack` script
+- **install.sh** — rewritten with better error handling, npm install path, node_modules copy
+- **vitest.config.ts** — includes `.test.tsx` files, excludes script-style test files
+- **CI workflow** — already existed, now runs against the updated test suite
+
+### 📊 Stats
+- Tests: 239 passing (was 120)
+- Bug fixes: 72 (10 critical security, 6 critical correctness, 12 high, 19 medium, 25 low)
+- New TUI components: 7 (theme, border, MessageList, Prompt, Footer, Dialog, Picker)
+- New test files: 5 (oc-tui, oc-tui-render, oc-keyboard, oc-picker-dialog-keys, oc-app-shortcuts, security)
+- Source files: 130+ TS/TSX (was 115+)
+- Lines of code: 25k+ (was 22k+)
+
+---
+
 ## [5.0.0] - 2026-06-15 — "Production-Ready"
 
 > **WllmConcept fully integrated, TUI polished, UX production-ready.** 4 major phases of improvements shipped.
@@ -158,6 +266,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[6.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v6.0.0
 [5.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v5.0.0
 [4.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v4.0.0
 [3.0.0]: https://github.com/ahmdd4vd/Huagent/releases/tag/v3.0.0

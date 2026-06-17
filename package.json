@@ -1,18 +1,23 @@
 {
   "name": "huagent",
-  "version": "5.0.1",
-  "description": "AI coding agent CLI — 22 LLM providers, 101 models, wiki knowledge engine, modern TUI, MIT-licensed",
+  "version": "6.0.0",
+  "description": "AI coding agent CLI — 22 LLM providers, 101 models, wiki knowledge engine, OpenCode-inspired TUI, MIT-licensed",
   "type": "module",
   "bin": {
     "huagent": "./bin/huagent.js"
   },
   "main": "./dist/cli.js",
+  "exports": {
+    ".": "./dist/cli.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "bin",
     "dist",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "dev": "tsx watch src/cli.tsx",
@@ -22,24 +27,47 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
     "snapshot:tui": "node scripts/snapshot.mjs full",
     "verify": "npm run lint && npm run test && npm run build",
-    "prepublishOnly": "npm run verify"
+    "prepublishOnly": "npm run verify",
+    "prepack": "npm run build",
+    "release": "npm run verify && npm publish",
+    "release:beta": "npm run verify && npm publish --tag beta"
   },
   "keywords": [
     "ai",
     "agent",
     "coding",
     "cli",
-    "anime",
     "tui",
+    "terminal",
     "anthropic",
     "claude",
     "openai",
-    "assistant"
+    "gemini",
+    "deepseek",
+    "groq",
+    "mistral",
+    "openrouter",
+    "ollama",
+    "assistant",
+    "chatbot",
+    "developer-tools",
+    "llm",
+    "ink"
   ],
   "author": "huanime",
   "license": "MIT",
+  "homepage": "https://github.com/ahmdd4vd/Huagent",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmdd4vd/Huagent.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ahmdd4vd/Huagent/issues",
+    "email": "huanime@users.noreply.github.com"
+  },
   "engines": {
     "node": ">=18.0.0"
   },

@@ -4,8 +4,10 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| 4.0.x   | ✅ Active          |
-| 3.0.x   | ⚠️ Security-only   |
+| 6.0.x   | ✅ Active          |
+| 5.0.x   | ⚠️ Security-only   |
+| 4.0.x   | ❌ End of life     |
+| 3.0.x   | ❌ End of life     |
 | 2.0.x   | ❌ End of life     |
 | 1.0.x   | ❌ End of life     |
 

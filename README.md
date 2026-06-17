@@ -1,22 +1,22 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Huagent-v5.0.0-FF6B9D?style=for-the-badge&logo=typescript&logoColor=white" />
+<img src="https://img.shields.io/badge/Huagent-v6.0.0-FF6B9D?style=for-the-badge&logo=typescript&logoColor=white" alt="Huagent v6.0.0" />
 
 # Huagent
 
-### The AI Coding Agent That Learns
+### The AI Coding Agent That Learns Your Codebase
 
-*A production-grade AI coding agent in your terminal — powered by a wiki knowledge engine, modern TUI, and 22 LLM providers.*
+*A production-grade AI coding agent in your terminal — powered by a wiki knowledge engine, OpenCode-inspired TUI, and 22 LLM providers.*
 
 [![npm](https://img.shields.io/npm/v/huagent?style=flat-square&logo=npm&logoColor=white&color=FF6B9D)](https://www.npmjs.com/package/huagent)
 [![Downloads](https://img.shields.io/npm/dm/huagent?style=flat-square&logo=npm&logoColor=white&color=C589E8)](https://www.npmjs.com/package/huagent)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-MIT-FFC75F?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-900%2B-7BC74D?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-239%20passing-7BC74D?style=flat-square)](#testing)
 [![Providers](https://img.shields.io/badge/providers-22-87CEEB?style=flat-square)](#providers)
 [![Models](https://img.shields.io/badge/models-101-FFB7C5?style=flat-square)](#providers)
 
-[Install](#-install) • [Features](#-features) • [Providers](#-providers) • [Docs](#-documentation) • [Contributing](#-contributing)
+[Install](#-install) · [Features](#-features) · [Providers](#-providers) · [Usage](#-usage) · [Contributing](#-contributing) · [Docs](#-documentation)
 
 </div>
 
@@ -25,53 +25,56 @@
 ## 🖥️ Preview
 
 ```
-╭──────────────────────────────────────────────────────────────────────────────╮
-│  huagent v5.0                                                                │
-│  ● autonomous off  ● scope none  ○ perm workspace-write     claude-sonnet-4 │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  > add jwt auth to our express app, replace the old session thing            │
-│                                                                              │
-│  ✓ PLAN   add jwt auth to our express app                 1.0s               │
-│  ✓ READ   src/middleware/auth.ts                          0.8s               │
-│  ✓ WRITE  src/middleware/jwt.ts                           2.0s               │
-│  ✓ TEST   src/middleware/jwt.ts: 12/12 passed             2.3s               │
-│                                                                              │
-│  ┌─ Diff: src/middleware/jwt.ts ──────────────────────────────────┐          │
-│  │  42  42   function validateToken(token: string): boolean {     │          │
-│  │  43     -   return jwt.verify(token, secret);                  │          │
-│  │      43 +   try { jwt.verify(token, secret); return true; }    │          │
-│  │      44 +   catch (e) { return false; }                        │          │
-│  └────────────────────────────────────────────────────────────────┘          │
-│                                                                              │
-│  [█████████████████████████] 100% (4/4 steps) ✓                              │
-│  Elapsed: 6.1s │ Tokens: 4.2k │ Cost: $0.0127                               │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
+  ╔════════════════════════════════════════════════════════════════════╗
+  ║  huagent v6.0.0                                                     ║
+  ║  AI coding agent CLI — 22 providers, 101 models                     ║
+  ╚════════════════════════════════════════════════════════════════════╝
+
+  │  Ask, search, or run /help for commands
+  │  huagent · claude-sonnet-4   anthropic
+  ╰
+     ready · ↵ send · alt+↵ newline · ↑↓ history · tab complete · ctrl+c exit
+  ~/projects/myapp • 2 LSP  /status
+  tokens: 1247  cost: $0.0089  perm: workspace-write  ? help  Ctrl+P/T/E/R pickers
 ```
 
 ---
 
 ## ⚡ Install
 
+### Option 1: npm (recommended)
+
 ```bash
-# One-liner (recommended)
-curl -fsSL https://raw.githubusercontent.com/ahmdd4vd/Huagent/main/install.sh | sh
-
-# npm
 npm install -g huagent
+```
 
-# From source
-git clone https://github.com/ahmdd4vd/Huagent.git && cd Huagent
-npm install && npm run build && node bin/huagent.js
+### Option 2: One-liner (from source)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ahmdd4vd/Huagent/main/install.sh | sh
+```
+
+### Option 3: From source (manual)
+
+```bash
+git clone https://github.com/ahmdd4vd/Huagent.git
+cd Huagent
+npm install
+npm run build
+node bin/huagent.js
 ```
 
 ### Quick Start
 
 ```bash
-export ANTHROPIC_API_KEY=***   # or any provider key
+# Set any provider's API key
+export ANTHROPIC_API_KEY=sk-ant-***   # or OPENAI_API_KEY, GEMINI_API_KEY, etc.
+
+# Launch the TUI
 huagent
 ```
+
+> **Node.js >= 18 required.** Huagent auto-detects your provider from environment variables — set one and you're ready.
 
 ---
 
@@ -81,12 +84,12 @@ huagent
 
 | | | |
 |:---:|:---:|:---:|
-| 🧠 **Wiki Knowledge Engine** | 🔄 **Auto-Ingest** | 🧬 **Self-Evolution** |
-| 5-memory system that learns from your codebase | Watches files & auto-creates wiki pages | Finds contradictions & suggests improvements |
-| 🔍 **Smart Autocomplete** | 🎨 **Syntax Highlighting** | 📊 **Progress Tracking** |
-| Fuzzy matching with context-aware suggestions | Auto-detect language, themed colors | Real-time bar, ETA, token count, cost |
-| 🔗 **Clickable Paths** | ❌ **Smart Errors** | 📁 **File Tree** |
-| Terminal hyperlinks, auto-open in editor | User-friendly messages with actionable fixes | Interactive tree with icons & metadata |
+| 🧠 **Wiki Knowledge Engine** | 🎨 **OpenCode-Inspired TUI** | 🔌 **22 LLM Providers** |
+| 5-memory system that learns from your codebase | Left-border prompt, minimal aesthetic, braille spinners | Anthropic, OpenAI, Gemini, DeepSeek, Groq, +17 more |
+| 🔄 **Auto-Ingest** | ⌨️ **Full Keyboard Control** | 🛡️ **Security-First** |
+| Watches files & auto-creates wiki pages | Emacs keys, multi-line, history, autocomplete | SSRF protection, path-traversal guards, default-deny |
+| 📊 **Cost Tracking** | 🔍 **Smart Search** | 🧪 **239 Tests** |
+| Real-time token count + cost per request | Fuzzy matching with intent-based routing | Comprehensive test suite covering all subsystems |
 
 </div>
 
@@ -100,7 +103,7 @@ Huagent ships with a **wiki knowledge engine** that makes your agent smarter ove
 │                                                         │
 │   Semantic ──── Facts, concepts, entities               │
 │   Episodic ──── Events, debugging sessions              │
-│   Structural ─── Architecture, dependencies             │
+│   Structural ── Architecture, dependencies              │
 │   Causal ────── Decisions, tradeoffs, migrations        │
 │   Meta ──────── Self-reflection, heuristics             │
 │                                                         │
@@ -114,29 +117,51 @@ Huagent ships with a **wiki knowledge engine** that makes your agent smarter ove
 - **Evolve** — Detects contradictions, suggests new pages, refreshes stale knowledge at session end
 - **Intent-Based Routing** — "what is", "how to", "why", "when", "compare", "pattern", "history"
 
-### 🎨 Modern TUI
+### 🎨 Modern TUI (OpenCode-Inspired)
 
-- **Syntax Highlighting** — Code blocks with auto-detected language (TS, JS, Python, Rust, Go, Bash, JSON)
-- **Diff View** — Line-by-line diffs with color-coded changes (`+` green, `-` red, context gray)
-- **File Tree** — Interactive tree with 📁/📄 icons, file metadata, expandable directories
-- **Progress Indicators** — Visual progress bar, step count, ETA, elapsed time, tokens, cost
+- **Left-border prompt** — signature OpenCode look, no boxy borders
+- **Braille spinners** (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) for thinking/writing states
+- **Multi-line input** — Alt+Enter inserts newline, ↑↓ navigate between lines
+- **Emacs editing** — Ctrl+A/E (line start/end), Ctrl+U/K (delete to start/end), Ctrl+W (delete word)
+- **History navigation** — ↑↓ through previous prompts
+- **Slash command autocomplete** — type `/mod` → get `/model`, `/models`, `/modes`
+- **Global shortcuts** — Ctrl+P (provider), Ctrl+T (model), Ctrl+E (scope), Ctrl+R (resume), Ctrl+L (clear), ? (help)
+- **Tool call badges** — inline status (✓ success, ✗ error, ⠋ running)
+- **Footer status bar** — directory, LSP/MCP counts, /status hint
+- **Responsive layout** — adapts to terminal width and height
 
-### 🎯 UX Polish
+### ⌨️ Full Keyboard Control
 
-- **Smart Errors** — Errors are classified (permission, file-not-found, syntax, network, API, config) with actionable copy-paste suggestions
-- **Fuzzy Autocomplete** — Type `/mod` and get `/model`, `/models`, `/modes` ranked by relevance
-- **Clickable Paths** — File paths are terminal hyperlinks (OSC 8) that auto-open in your editor
-- **Enhanced Loading** — Progress bar + current step + ETA + action buttons (Cancel, Details, Background)
+| Key | Action |
+|-----|--------|
+| `Enter` | Submit prompt |
+| `Alt+Enter` / `Shift+Enter` | Insert newline (multi-line) |
+| `↑` / `↓` | Navigate history (single-line) or cursor (multi-line) |
+| `←` / `→` | Move cursor horizontally |
+| `Ctrl+A` / `Home` | Move to line start |
+| `Ctrl+E` / `End` | Move to line end |
+| `Ctrl+U` | Delete to line start |
+| `Ctrl+K` | Delete to line end |
+| `Ctrl+W` | Delete previous word |
+| `Tab` | Accept autocomplete suggestion |
+| `Esc` | Close autocomplete / dialog |
+| `Ctrl+C` | Exit huagent |
+| `Ctrl+P` | Open provider picker |
+| `Ctrl+T` | Open model picker |
+| `Ctrl+E` | Open scope picker |
+| `Ctrl+R` | Resume previous session |
+| `Ctrl+K` | Command palette |
+| `Ctrl+L` | Clear messages |
+| `?` | Show help dialog |
 
-### ⚙️ Engine
+### 🛡️ Security-First Design
 
-- **22 LLM providers** out of the box, 101 models with pricing + capabilities
-- **Stream-native** — Type-safe SSE, automatic tool-call accumulation, accurate cost tracking
-- **Discipline layer** — Every task: Plan → Ground → Observe → Diagnose → Verify
-- **26 slash commands** — Full runtime control over model, provider, mode, scope, memory
-- **5 permission modes** — read-only, workspace-write, sandboxed, danger-full-access, custom
-- **Auto-detect** — Set an env var, huagent figures out the provider
-- **MIT licensed** — Free forever
+- **SSRF protection** — `web` tool blocks private IPs, loopback, cloud metadata (169.254.169.254), link-local
+- **Path traversal guards** — session ids, /export filenames validated against `^[A-Za-z0-9_-]+$`
+- **Shell injection prevention** — `grep` and `hooks` use `execFile` with arg arrays (no shell interpolation)
+- **Default-deny permissions** — unknown tools are denied by default in `workspace-write` mode
+- **OAuth secret hardening** — Google OAuth secrets support env override (`HUAGENT_GOOGLE_*_CLIENT_SECRET`)
+- **ZIP-bomb protection** — bundle reader tracks actual decompressed bytes, not just reported size
 
 ---
 
@@ -198,6 +223,57 @@ Set any of these env vars and huagent picks the provider automatically:
 
 ---
 
+## 🛠️ Usage
+
+### Slash Commands
+
+| Command | What it does |
+|---------|-------------|
+| `/model <name>` | Switch LLM model |
+| `/provider <name>` | Switch provider |
+| `/models` | Browse all 101 models |
+| `/providers` | List all 22 providers |
+| `/autonomous` | Toggle autonomous mode |
+| `/scope <file>` | Limit edits to one file |
+| `/permissions <mode>` | Switch permission mode |
+| `/memory` | Inspect knowledge base |
+| `/skills` | List installed skills |
+| `/status` | Session status + stats |
+| `/cost` | Token usage + cost breakdown |
+| `/sessions` | List saved sessions |
+| `/resume <id>` | Resume a session |
+| `/diff` | Show git diff |
+| `/doctor` | Run diagnostics |
+| `/clear` | Fresh session |
+| `/help` | Show all commands |
+| `/exit` | Exit huagent |
+
+### CLI Flags
+
+```bash
+huagent                                              # interactive TUI
+huagent "fix the auth bug"                           # one-shot mode
+huagent --provider anthropic --model claude-sonnet-4 # pick provider + model
+huagent --autonomous                                 # no confirmations
+huagent --scope src/auth.ts                          # limit to one file
+huagent --permission-mode sandboxed                  # sandboxed edits
+huagent --no-tui                                     # simple REPL mode
+huagent version                                      # show version
+huagent --help                                       # show help
+```
+
+### Permission Modes
+
+| Mode | What you can do |
+|------|----------------|
+| `read-only` | Read files, no edits |
+| `workspace-write` | Edit project files (default) |
+| `sandboxed` | Edits go to a temp directory |
+| `danger-full-access` | No confirmations at all |
+| `allow` | Auto-approve everything (autonomous) |
+
+---
+
 ## 📊 By the Numbers
 
 <div align="center">
@@ -206,14 +282,16 @@ Set any of these env vars and huagent picks the provider automatically:
 |--------|-------|
 | **LLM Providers** | 22 |
 | **Models** | 101 |
-| **Tests** | 900+ |
-| **Source Files** | 115+ |
+| **Tests** | 239 passing |
+| **Source Files** | 130+ TS/TSX |
 | **Slash Commands** | 26 |
 | **Permission Modes** | 5 |
 | **Memory Systems** | 5 |
-| **TUI Components** | 12 |
-| **Documentation** | 5,600+ lines |
-| **Lines of Code** | 22,000+ |
+| **TUI Components** | 20+ |
+| **Documentation** | 6,000+ lines |
+| **Lines of Code** | 25,000+ |
+| **Security Fixes** | 72 bugs fixed |
+| **Keyboard Shortcuts** | 20+ |
 
 </div>
 
@@ -222,7 +300,7 @@ Set any of these env vars and huagent picks the provider automatically:
 ## 🧪 Testing
 
 ```bash
-npm test              # run all tests
+npm test              # run all 239 tests
 npm run verify        # lint + test + build
 ```
 
@@ -234,9 +312,12 @@ npm run verify        # lint + test + build
 | TUI v4 | 119 | Theme, activity store, status bar, slash commands |
 | CLI commands | 68 | All 26 slash commands, option parsing |
 | WllmConcept | 26 | WikiMemory, 5-memory routing, lint, evolve |
-| Auto-Ingest | 40 | Content analyzer, file watcher, page creation |
-| TUI polish | 40 | Syntax highlighting, diff view, file tree, progress |
-| UX polish | 40 | Error handler, autocomplete, clickable paths, loading |
+| Auto-Ingest | 25 | Content analyzer, file watcher, page creation |
+| OpenCode TUI | 52 | Theme, borders, MessageList, Prompt, Picker, Dialog |
+| Keyboard | 16 | Enter, Esc, Tab, Ctrl+C/U/W, Alt+Enter, arrows |
+| App shortcuts | 8 | Ctrl+P/T/E/L, ?, stats, footer |
+| Security | 25 | SSRF, path traversal, LRU, dialog reset, limit:0 |
+| Render | 23 | MessageList, Footer, Dialog, Picker rendering |
 
 ---
 
@@ -265,16 +346,15 @@ src/
 │       └── graph/            # SQLite-backed graph store
 │
 ├── tui/                      # terminal user interface
-│   ├── ModernApp.tsx         # production TUI (use this)
-│   ├── new-layout.tsx        # responsive layout system
-│   ├── syntax-highlighter.tsx # code syntax highlighting
-│   ├── diff-view.tsx         # line-by-line diff rendering
-│   ├── file-tree.tsx         # interactive file tree
-│   ├── progress-indicator.tsx # progress bars + ETA
-│   ├── error-handler.tsx     # user-friendly error messages
-│   ├── smart-autocomplete.tsx # fuzzy command/file completion
-│   ├── clickable-files.tsx   # terminal hyperlinks
-│   └── loading-states.tsx    # enhanced loading UI
+│   ├── OpenCodeApp.tsx       # production TUI (OpenCode-inspired)
+│   └── oc/                   # OpenCode-style components
+│       ├── theme.ts          # 12-step grayscale + semantic palette
+│       ├── border.ts         # SplitBorder, LeftBorder, TopBorder
+│       ├── MessageList.tsx   # chat history with tool call badges
+│       ├── Prompt.tsx        # left-border textarea + autocomplete
+│       ├── Footer.tsx        # status bar (directory, LSP, MCP)
+│       ├── Dialog.tsx        # modal dialogs (confirm, alert, help)
+│       └── Picker.tsx        # fuzzy-searchable list dialog
 │
 ├── wllm/                     # wiki knowledge engine
 │   ├── graph/                # WikiStore (bi-temporal property graph)
@@ -300,55 +380,9 @@ src/
 | [API Reference](docs/API_REFERENCE.md) | Full API documentation for all modules |
 | [WllmConcept](docs/WLLMCONCEPT_GUIDE.md) | Wiki knowledge engine deep-dive |
 | [Auto-Ingest](docs/AUTO_INGEST_GUIDE.md) | File watcher + content analysis |
-| [TUI Polish](docs/PHASE3_TUI_POLISH_GUIDE.md) | Syntax highlighting, diff view, file tree |
-| [UX Polish](docs/PHASE4_UX_POLISH_GUIDE.md) | Error messages, autocomplete, loading states |
 | [Contributing](.github/CONTRIBUTING.md) | How to contribute to Huagent |
-
----
-
-## 🛠️ Usage
-
-### Slash Commands
-
-| Command | What it does |
-|---------|-------------|
-| `/model <name>` | Switch LLM model |
-| `/provider <name>` | Switch provider |
-| `/models` | Browse all 101 models |
-| `/providers` | List all 22 providers |
-| `/autonomous` | Toggle autonomous mode |
-| `/scope <file>` | Limit edits to one file |
-| `/permissions <mode>` | Switch permission mode |
-| `/memory` | Inspect knowledge base |
-| `/skills` | List installed skills |
-| `/status` | Session status + stats |
-| `/cost` | Token usage + cost breakdown |
-| `/sessions` | List saved sessions |
-| `/resume <id>` | Resume a session |
-| `/diff` | Show git diff |
-| `/doctor` | Run diagnostics |
-| `/clear` | Fresh session |
-
-### CLI Flags
-
-```bash
-huagent                                              # interactive TUI
-huagent "fix the auth bug"                           # one-shot mode
-huagent --provider anthropic --model claude-sonnet-4-6  # pick provider + model
-huagent --autonomous                                 # no confirmations
-huagent --scope src/auth.ts                          # limit to one file
-huagent --permission-mode sandboxed                   # sandboxed edits
-```
-
-### Permission Modes
-
-| Mode | What you can do |
-|------|----------------|
-| `read-only` | Read files, no edits |
-| `workspace-write` | Edit project files (default) |
-| `sandboxed` | Edits go to a temp directory |
-| `danger-full-access` | No confirmations at all |
-| `custom` | Your own ruleset |
+| [Security](SECURITY.md) | Vulnerability reporting + threat model |
+| [Changelog](CHANGELOG.md) | Release history |
 
 ---
 
@@ -358,11 +392,53 @@ Bug reports and feature requests welcome via [issues](https://github.com/ahmdd4v
 
 See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for development setup and guidelines.
 
+### Quick Start for Contributors
+
+```bash
+git clone https://github.com/ahmdd4vd/Huagent.git
+cd Huagent
+npm install
+npm run dev           # watch mode (auto-rebuild on save)
+npm test              # run all 239 tests
+npm run verify        # lint + test + build (must pass before PR)
+```
+
+### Commit Message Format
+
+```
+type(scope): short summary
+
+Body explaining the why. Reference issues with #123.
+```
+
+Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `style`, `perf`.
+
 ---
 
 ## 🔒 Security
 
 See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy and threat model.
+
+**Don't open a public issue for security bugs.** Use GitHub's private vulnerability reporting:
+https://github.com/ahmdd4vd/Huagent/security/advisories/new
+
+---
+
+## 📦 Publishing (Maintainers)
+
+```bash
+# 1. Update version in package.json
+# 2. Update CHANGELOG.md
+# 3. Run verify
+npm run verify
+
+# 4. Publish to npm
+npm publish
+
+# 5. Tag and push
+git tag v6.0.0
+git push origin v6.0.0
+```
 
 ---
 
@@ -370,7 +446,7 @@ See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy and threat
 
 **[MIT](LICENSE)** © 2026 **Huanime**
 
-Built with [Ink](https://github.com/vadimdemedes/ink) • Inspired by [claw-code](https://github.com/ultraworkers/claw-code), [OpenClaude](https://github.com/Gitlawb/openclaude), and [ECC](https://github.com/affaan-m/ECC)
+Built with [Ink](https://github.com/vadimdemedes/ink) · Inspired by [OpenCode](https://github.com/anomalyco/opencode), [claw-code](https://github.com/ultraworkers/claw-code), and [OpenClaude](https://github.com/Gitlawb/openclaude)
 
 <sub>The AI coding agent that learns from your codebase.</sub>
 
