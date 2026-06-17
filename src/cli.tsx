@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import React from 'react';
 import { render } from 'ink';
 import { ModernApp } from './tui/ModernApp.js';
+import { OpenCodeApp } from './tui/OpenCodeApp.js';
 import { Engine } from './engine/core.js';
 import { UnifiedClient } from './providers/client.js';
 import { PROVIDERS, detectProviderFromEnv, type ProviderId } from './providers/registry.js';
@@ -16,7 +17,8 @@ import { getSkills, type Skill } from './skills.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { theme, fg, sparkleText as sparkle, gradient } from './tui/theme.js';
+import { theme as legacyTheme, fg, sparkleText as sparkle, gradient } from './tui/theme.js';
+import { theme, fg as ocFg } from './tui/oc/theme.js';
 import { mascots } from './tui/mascot.js';
 import { config as loadDotenv } from 'dotenv';
 import { runOnboarding } from './onboarding/wizard.js';
@@ -313,7 +315,10 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
     }
   }
 
-  printBanner();
+  // No banner — the TUI/REPL prints its own minimal header. Keeping the
+  // printBanner function around for backward compat in case external code
+  // calls it, but we don't invoke it from the main entry point anymore.
+  // printBanner();
 
   if (options.provider) config.provider = options.provider;
   if (options.model) config.model = options.model;
@@ -348,13 +353,14 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
     client.setModel(config.model);
   }
 
-  console.log(`${mascots.smallHua} ${fg(theme.success, 'Connected to ' + client.getProviderName() + '/' + (config.model || client.getModel()))}`);
-  console.log(`${mascots.smallHua} ${fg(theme.sky, 'Memory: ' + memory.stats().memories + ' memories, ' + memory.stats().skills + ' skills, ' + skills.list().length + ' skill files')}`);
-  console.log(`${mascots.smallHua} ${fg(theme.lavender, 'Permission: ' + tools.getPermissionMode())}`);
+  // Minimal "connected" line — no mascot character, OpenCode-style.
+  // The full status info (memory, permission) is shown inside the TUI/REPL
+  // itself, so we don't need to duplicate it here.
+  // (The old mascot-based lines were removed to match the OpenCode aesthetic.)
 
   // One-shot mode
   if (message) {
-    console.log(`\n${fg(theme.fgDim, '✧ Streaming response...')}\n`);
+    console.log(`\n${fg(theme.textMuted, '⠋ streaming...')}\n`);
     let fullResponse = '';
     for await (const event of client.stream({
       model: config.model || client.getModel(),
@@ -403,7 +409,9 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
       onEvent: (event: any) => {},
     });
 
-    const AppComponent = ModernApp;
+    // OpenCodeApp is the new production TUI (OpenCode-inspired design).
+    // ModernApp is kept as a fallback in case the new TUI has issues.
+    const AppComponent = OpenCodeApp;
 
     // Wire the dialog controller so the TUI can pause the engine
     // for questions / permissions / plan reviews.
@@ -444,31 +452,57 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
 
     await waitUntilExit();
   } else {
-    // Simple REPL mode
+    // Simple REPL mode (OpenCode-inspired: minimal output, no mascot).
     const readline = await import('node:readline');
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: process.stdin.isTTY,
+    });
     const engine = new Engine(client, memory, tools, sessions);
 
+    // Print a minimal header — no mascot, no big banner.
+    console.log(fg(theme.text, `huagent v${VERSION}`));
+    console.log(fg(theme.textMuted, `Type a request or /help for commands. Ctrl+C to exit.`));
+    console.log(fg(theme.textMuted, `Provider: ${client.getProviderName?.() ?? 'unknown'} · Model: ${client.getModel()}`));
+    console.log('');
+
+    let closed = false;
+    rl.on('close', () => { closed = true; });
+
     const prompt = () => {
-      rl.question(fg(theme.primary, '\n❯ '), async (input) => {
-        const cmd = input.trim();
-        if (cmd === '/exit' || cmd === '/quit') {
-          console.log(`${mascots.winkHua} ${fg(theme.sakura, 'Goodbye!')}`);
-          store.close();
-          rl.close();
-          return;
-        }
-        if (cmd) {
-          console.log(fg(theme.fgDim, '✧ Hua is thinking...'));
-          try {
-            const response = await engine.process(cmd, config.workdir);
-            console.log('\n' + fg(theme.primary, '✧ Hua: ') + response);
-          } catch (err: any) {
-            console.error(fg(theme.danger, 'Error: ' + err.message));
+      if (closed) return;
+      try {
+        rl.question(fg(theme.primary, '❯ '), async (input) => {
+          if (closed) return;
+          const cmd = (input || '').trim();
+          if (cmd === '/exit' || cmd === '/quit') {
+            console.log(fg(theme.textMuted, 'bye.'));
+            store.close();
+            rl.close();
+            return;
           }
-        }
-        prompt();
-      });
+          if (cmd) {
+            // Use braille spinner for "thinking" — matches the TUI's aesthetic.
+            process.stdout.write(fg(theme.textMuted, '⠋ thinking...'));
+            try {
+              const response = await engine.process(cmd, config.workdir);
+              // Clear the thinking line and print the response.
+              process.stdout.write('\r\x1b[K');
+              console.log(fg(theme.accent, 'huagent') + fg(theme.textMuted, ' ·'));
+              console.log(fg(theme.text, response));
+              console.log('');
+            } catch (err: any) {
+              process.stdout.write('\r\x1b[K');
+              console.error(fg(theme.error, `error: ${err.message}`));
+            }
+          }
+          // Schedule next prompt on next tick so we don't recurse.
+          setImmediate(prompt);
+        });
+      } catch {
+        // readline was closed — exit gracefully.
+      }
     };
 
     prompt();

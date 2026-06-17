@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     // The excluded files are "script-style" test files that use a custom
     // test() function and process.exit() — they are run as child processes
     // by tests/run.test.ts, not directly by vitest. Loading them inside
