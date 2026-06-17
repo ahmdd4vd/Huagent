@@ -54,10 +54,19 @@ function buildTree(
   if (depth > maxDepth) return null;
 
   const name = basename(path);
-  const isDir = statSync(path).isDirectory();
+  // CRITICAL: statSync throws ENOENT if the path doesn't exist (e.g.
+  // a broken symlink or a race where the file was deleted between the
+  // readdir and the stat). Wrap in try/catch so the renderer doesn't
+  // crash — return null to skip this entry.
+  let stats;
+  try {
+    stats = statSync(path);
+  } catch {
+    return null;
+  }
+  const isDir = stats.isDirectory();
 
   if (!isDir) {
-    const stats = statSync(path);
     return {
       name,
       path,

@@ -125,11 +125,15 @@ export class HookSystem {
           await mod.default(ctx);
         }
       } else if (ext === '.sh') {
-        const { exec } = await import('node:child_process');
+        // SECURITY: Use execFile (not exec) with an argument array so
+        // neither the script path nor the JSON data is interpreted by a
+        // shell. This eliminates command-injection via backticks/$()/; in
+        // either value.
+        const { execFile } = await import('node:child_process');
         const { promisify } = await import('node:util');
-        const execAsync = promisify(exec);
-        const safeData = JSON.stringify(ctx.data).replace(/'/g, "'\\''");
-        await execAsync(`bash "${scriptPath}" '${safeData}'`);
+        const execFileAsync = promisify(execFile);
+        const dataArg = JSON.stringify(ctx.data);
+        await execFileAsync('bash', [scriptPath, dataArg]);
       }
     } catch (err) {
       console.error(`Hook script failed (${scriptPath}):`, err);

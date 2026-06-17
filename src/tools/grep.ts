@@ -1,8 +1,12 @@
 // Grep tool - search file contents using ripgrep
-import { exec } from 'node:child_process';
+//
+// SECURITY: We use execFile (not exec) with an argument array so the
+// pattern/path/include values are NEVER interpreted by a shell. This
+// eliminates command-injection via backticks, $(), etc.
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export const grepTool = {
   name: 'grep',
@@ -20,51 +24,64 @@ export const grepTool = {
   },
   async execute(args: { pattern: string; path?: string; include?: string; maxResults?: number; caseSensitive?: boolean }) {
     const target = args.path || '.';
-    const max = args.maxResults || 50;
+    const max = args.maxResults ?? 50;
     const include = args.include || '*';
-    const caseFlag = args.caseSensitive ? '' : '-i';
+    const caseFlag = args.caseSensitive ? [] : ['-i'];
 
-    // Escape shell arguments to prevent command injection
-    const safePattern = args.pattern.replace(/"/g, '\\"').replace(/\$/g, '\\$');
-    const safeInclude = include.replace(/"/g, '\\"').replace(/'/g, "\\'");
-    const safeTarget = target.replace(/"/g, '\\"');
-
-    // Use rg if available, fallback to grep
-    let cmd = `rg ${caseFlag} --line-number --no-heading --max-count=${max} -g "${safeInclude}" "${safePattern}" "${safeTarget}"`;
+    // Build rg args as an array — execFile passes them straight to the
+    // child without shell interpretation, so backticks/$()/; are safe.
+    const rgArgs = [
+      ...caseFlag,
+      '--line-number',
+      '--no-heading',
+      `--max-count=${max}`,
+      '-g', include,
+      args.pattern,  // raw pattern, rg interprets as regex
+      target,
+    ];
 
     try {
-      const { stdout } = await execAsync(cmd, { maxBuffer: 5_000_000 });
-      const lines = stdout.trim().split('\n').filter(Boolean);
-      return {
-        pattern: args.pattern,
-        count: lines.length,
-        truncated: lines.length >= max,
-        matches: lines.slice(0, max).map((line) => {
-          const [file, lineNum, ...rest] = line.split(':');
-          return { file, line: parseInt(lineNum, 10), content: rest.join(':') };
-        }),
-      };
+      const { stdout } = await execFileAsync('rg', rgArgs, { maxBuffer: 5_000_000 });
+      return parseGrepOutput(stdout, args.pattern, max);
     } catch (err: any) {
-      // rg returns exit 1 when no matches
+      // rg exits 1 when no matches — that's not an error.
       if (err.code === 1) {
         return { pattern: args.pattern, count: 0, matches: [] };
       }
-      // Fallback to grep
-      const fallback = `grep -rn ${caseFlag} -E --include="${safeInclude}" "${safePattern}" "${safeTarget}" | head -${max}`;
+      // rg not installed or other error — fall back to grep with the same
+      // execFile-based argument array.
+      const grepArgs = [
+        '-rn',
+        ...caseFlag,
+        '-E',
+        `--include=${include}`,
+        args.pattern,
+        target,
+      ];
       try {
-        const { stdout } = await execAsync(fallback, { maxBuffer: 5_000_000 });
-        const lines = stdout.trim().split('\n').filter(Boolean);
-        return {
-          pattern: args.pattern,
-          count: lines.length,
-          matches: lines.slice(0, max).map((line) => {
-            const m = line.match(/^([^:]+):(\d+):(.*)$/);
-            return m ? { file: m[1], line: parseInt(m[2], 10), content: m[3] } : { file: line, line: 0, content: '' };
-          }),
-        };
+        const { stdout } = await execFileAsync('grep', grepArgs, { maxBuffer: 5_000_000 });
+        // `grep | head` would require a shell — instead we slice in JS.
+        return parseGrepOutput(stdout, args.pattern, max);
       } catch (e: any) {
+        // grep also exits 1 on no matches.
+        if (e.code === 1) {
+          return { pattern: args.pattern, count: 0, matches: [] };
+        }
         return { pattern: args.pattern, count: 0, matches: [], error: e.message };
       }
     }
   },
 };
+
+function parseGrepOutput(stdout: string, pattern: string, max: number) {
+  const lines = stdout.trim().split('\n').filter(Boolean);
+  return {
+    pattern,
+    count: lines.length,
+    truncated: lines.length >= max,
+    matches: lines.slice(0, max).map((line) => {
+      const [file, lineNum, ...rest] = line.split(':');
+      return { file, line: parseInt(lineNum, 10) || 0, content: rest.join(':') };
+    }),
+  };
+}

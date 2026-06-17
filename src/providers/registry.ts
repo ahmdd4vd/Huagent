@@ -483,8 +483,15 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     contextWindow: 1048576,
     executor: 'antigravity',
     oauth: {
-      clientId: '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
-      clientSecret: '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',
+      // NOTE: For Google OAuth "installed app" flow, the client_secret is
+      // treated as a PUBLIC value (per Google's own docs: "The client_secret
+      // is not treated as a secret for installed applications"). It's
+      // embedded in the binary and can't be truly hidden. We allow env
+      // override (HUAGENT_GOOGLE_ANTIGRAVITY_CLIENT_SECRET /
+      // HUAGENT_GOOGLE_ANTIGRAVITY_CLIENT_ID) for users who want to use
+      // their own OAuth app.
+      clientId: process.env.HUAGENT_GOOGLE_ANTIGRAVITY_CLIENT_ID || '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com',
+      clientSecret: process.env.HUAGENT_GOOGLE_ANTIGRAVITY_CLIENT_SECRET || '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',
       authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
       scopes: 'openid https://www.googleapis.com/auth/cloud-platform',
@@ -506,8 +513,10 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     contextWindow: 1048576,
     executor: 'gemini-cli',
     oauth: {
-      clientId: '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
-      clientSecret: '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',
+      // See note above — Google OAuth installed-app secrets are public.
+      // Env override: HUAGENT_GOOGLE_GEMINI_CLI_CLIENT_SECRET / _CLIENT_ID.
+      clientId: process.env.HUAGENT_GOOGLE_GEMINI_CLI_CLIENT_ID || '681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com',
+      clientSecret: process.env.HUAGENT_GOOGLE_GEMINI_CLI_CLIENT_SECRET || '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',
       authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
       scopes: 'openid https://www.googleapis.com/auth/generative-language',

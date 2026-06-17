@@ -368,16 +368,20 @@ export class WikiStore {
   /**
    * Delete a page (supersedes by setting validTo).
    * History is preserved.
+   *
+   * The previous implementation called `updatePage(id, {}, now)` (which
+   * creates an empty new version) then separately tried to set `validTo`
+   * via `graph.updateNode` — but the local mutation of `current.validTo`
+   * was never persisted, and the empty `updatePage` left an empty
+   * current version in history. We now set `validTo` directly via
+   * `graph.updateNode` in a single call, which closes the current
+   * version cleanly.
    */
   async deletePage(id: string): Promise<boolean> {
-    const updated = await this.updatePage(id, {}, Date.now());
-    // Also need to set validTo on the current version
     const current = await this.graph.getNode(id);
-    if (current) {
-      (current as any).validTo = Date.now();
-      await this.graph.updateNode(id, { validTo: Date.now() } as any);
-    }
-    return updated !== null;
+    if (!current) return false;
+    await this.graph.updateNode(id, { validTo: Date.now() } as any);
+    return true;
   }
 
   // ===================================================================

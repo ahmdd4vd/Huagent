@@ -57,7 +57,12 @@ export const QuestionPrompt: React.FC<QuestionPromptProps> = ({
   const currentQ = questions[tabIdx];
   const onConfirmTab = !singleQuestion && tabIdx === questions.length;
   const options = currentQ?.options ?? [];
-  const allowCustom = currentQ?.options.length !== 0; // heuristic; can be refined
+  // allowCustom: when there are NO predefined options, the user must be
+  // able to type a custom answer. The previous logic was inverted
+  // (`!== 0` returned false when options was empty, blocking custom input
+  // exactly when it was needed). Fixed: `=== 0` returns true when no
+  // options exist, allowing custom input.
+  const allowCustom = options.length === 0;
   const onCustom = cursor === options.length && allowCustom;
   const currentAnswer = answers[tabIdx] ?? [];
 

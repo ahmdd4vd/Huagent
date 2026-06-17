@@ -102,13 +102,16 @@ export const EnhancedLoading: React.FC<EnhancedLoadingProps> = ({
     }
   });
 
-  const percentage = Math.round((current / total) * 100);
+  // Guard against division by zero when total === 0 (produces NaN%
+  // and NaN bar width). Treat 0/0 as 0%.
+  const pct = total > 0 ? current / total : 0;
+  const percentage = Math.round(pct * 100);
   const elapsed = now - startTime;
   const eta = calculateETA(current, total, elapsed);
 
   // Progress bar (30 chars wide)
   const barWidth = 30;
-  const filled = Math.round((current / total) * barWidth);
+  const filled = Math.round(pct * barWidth);
   const empty = barWidth - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
 
@@ -221,9 +224,11 @@ export const LoadingProgress: React.FC<{
     return () => clearInterval(interval);
   }, []);
 
-  const percentage = Math.round((current / total) * 100);
+  // Guard against division by zero.
+  const pct = total > 0 ? current / total : 0;
+  const percentage = Math.round(pct * 100);
   const elapsed = now - startTime;
-  const filled = Math.round((current / total) * 25);
+  const filled = Math.round(pct * 25);
   const empty = 25 - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
 

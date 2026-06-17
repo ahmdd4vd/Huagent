@@ -34,6 +34,8 @@ export interface SqliteStoreOptions {
  */
 export class SqliteGraphStore implements GraphStore {
   private db: Database.Database;
+  /** Tracks whether FTS5 virtual table was successfully created. */
+  private ftsAvailable: boolean = false;
 
   constructor(opts: SqliteStoreOptions) {
     if (opts.path !== ":memory:") {
@@ -93,8 +95,10 @@ export class SqliteGraphStore implements GraphStore {
           body
         );
       `);
+      this.ftsAvailable = true;
     } catch (e) {
       // FTS5 not available, fallback to LIKE search
+      this.ftsAvailable = false;
       console.warn("FTS5 not available, using LIKE fallback");
     }
   }
@@ -125,14 +129,17 @@ export class SqliteGraphStore implements GraphStore {
       n.recordedAt,
       n.confidence
     );
-    // Update FTS
-    try {
-      const fts = this.db.prepare(`
-        INSERT INTO nodes_fts (node_id, label, body) VALUES (?, ?, ?)
-      `);
-      fts.run(n.id, n.label, n.body ?? "");
-    } catch (e) {
-      // ignore FTS errors
+    // Update FTS (only if FTS5 is available — otherwise this is a no-op
+    // and search falls back to LIKE).
+    if (this.ftsAvailable) {
+      try {
+        const fts = this.db.prepare(`
+          INSERT INTO nodes_fts (node_id, label, body) VALUES (?, ?, ?)
+        `);
+        fts.run(n.id, n.label, n.body ?? "");
+      } catch (e) {
+        // ignore FTS errors
+      }
     }
   }
 
@@ -291,19 +298,23 @@ export class SqliteGraphStore implements GraphStore {
 
   async search(text: string, limit: number = 20): Promise<GraphNode[]> {
     const t = text.toLowerCase();
-    // Try FTS5 first
-    try {
-      const ftsRows = this.db.prepare(`
-        SELECT n.* FROM nodes n
-        JOIN nodes_fts f ON f.node_id = n.id
-        WHERE nodes_fts MATCH ? AND n.valid_to IS NULL
-        LIMIT ?
-      `).all(text + "*", limit);
-      if (ftsRows.length > 0) {
-        return ftsRows.map(r => this.rowToNode(r));
+    // Try FTS5 first (only if available — the previous code always
+    // tried FTS, which threw `no such table: nodes_fts` on systems
+    // where FTS5 wasn't compiled into better-sqlite3).
+    if (this.ftsAvailable) {
+      try {
+        const ftsRows = this.db.prepare(`
+          SELECT n.* FROM nodes n
+          JOIN nodes_fts f ON f.node_id = n.id
+          WHERE nodes_fts MATCH ? AND n.valid_to IS NULL
+          LIMIT ?
+        `).all(text + "*", limit);
+        if (ftsRows.length > 0) {
+          return ftsRows.map(r => this.rowToNode(r));
+        }
+      } catch (e) {
+        // FTS query failed (e.g. malformed MATCH syntax) — fall through to LIKE.
       }
-    } catch (e) {
-      // FTS query failed, fall through to LIKE
     }
 
     // LIKE fallback
@@ -324,7 +335,15 @@ export class SqliteGraphStore implements GraphStore {
   }
 
   async clear(): Promise<void> {
-    this.db.exec(`DELETE FROM nodes; DELETE FROM edges; DELETE FROM nodes_fts;`);
+    // CRITICAL: Only delete from nodes_fts if FTS5 was successfully
+    // created at init time. If FTS5 was unavailable, the nodes_fts
+    // table doesn't exist and `DELETE FROM nodes_fts` throws
+    // `SQLITE_ERROR: no such table: nodes_fts`, crashing the caller.
+    if (this.ftsAvailable) {
+      this.db.exec(`DELETE FROM nodes_fts; DELETE FROM nodes; DELETE FROM edges;`);
+    } else {
+      this.db.exec(`DELETE FROM nodes; DELETE FROM edges;`);
+    }
   }
 
   /** Close the database. Call this when done. */

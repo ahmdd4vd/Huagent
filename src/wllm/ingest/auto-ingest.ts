@@ -150,6 +150,8 @@ export class AutoIngest {
   private watchRoot: string = '';
   /** Resolves when chokidar's 'ready' event has fired (or 2s safety timeout). */
   private readyPromise: Promise<void> = Promise.resolve();
+  /** Safety-net timer that resolves readyPromise after 2s even if 'ready' never fires. Cleared in stop(). */
+  private safetyTimer: NodeJS.Timeout | null = null;
   private stats: IngestStats = {
     filesWatched: 0,
     filesIngested: 0,
@@ -240,15 +242,26 @@ export class AutoIngest {
     // Resolve the ready promise on the 'ready' event. We also resolve on
     // 'error' to avoid hanging tests if chokidar fails to initialize.
     this.readyPromise = new Promise<void>((resolve) => {
-      const onReady = () => {
-        console.log('[AutoIngest] Watcher ready');
+      let resolved = false;
+      const finish = () => {
+        if (resolved) return;
+        resolved = true;
+        // CRITICAL: clear the safety-net timer so it doesn't keep the
+        // event loop alive (and don't leave a dangling reference that
+        // prevents clean shutdown on `stop()`).
+        if (safetyTimer) clearTimeout(safetyTimer);
         resolve();
       };
+      const onReady = () => {
+        console.log('[AutoIngest] Watcher ready');
+        finish();
+      };
       this.watcher!.once('ready', onReady);
-      this.watcher!.once('error', () => resolve());
+      this.watcher!.once('error', finish);
       // Safety net: if 'ready' never fires (e.g. on some networked
       // filesystems), resolve after 2 seconds so callers don't hang.
-      setTimeout(() => resolve(), 2000);
+      const safetyTimer: NodeJS.Timeout = setTimeout(finish, 2000);
+      this.safetyTimer = safetyTimer;
     });
 
     this.watcher
@@ -287,6 +300,13 @@ export class AutoIngest {
       console.log('[AutoIngest] Stopping file watcher');
       await this.watcher.close();
       this.watcher = null;
+    }
+
+    // Clear the safety-net timer so it doesn't keep the event loop alive
+    // after stop() is called.
+    if (this.safetyTimer) {
+      clearTimeout(this.safetyTimer);
+      this.safetyTimer = null;
     }
 
     // Clear all debounce timers

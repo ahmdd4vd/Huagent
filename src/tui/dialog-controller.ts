@@ -118,6 +118,26 @@ class DialogControllerImpl {
     p.resolve(r);
     this.notify();
   }
+
+  /**
+   * Reject all pending question/permission/plan promises with safe defaults.
+   * Used by `resetDialogController()` to prevent the engine from hanging
+   * forever when the dialog controller singleton is replaced mid-session.
+   */
+  rejectAllPending(): void {
+    if (this.state.question) {
+      this.state.question.resolve([]);
+      this.state.question = null;
+    }
+    if (this.state.permission) {
+      this.state.permission.resolve('deny');
+      this.state.permission = null;
+    }
+    if (this.state.plan) {
+      this.state.plan.resolve('reject');
+      this.state.plan = null;
+    }
+  }
 }
 
 // Module-level singleton
@@ -130,6 +150,10 @@ export function getDialogController(): DialogControllerImpl {
 // Test helper
 export function resetDialogController(): void {
   if (_instance) {
+    // CRITICAL: Reject any pending promises before replacing the instance,
+    // otherwise the engine will hang forever waiting for an answer that
+    // will never come.
+    _instance.rejectAllPending();
     _instance = new DialogControllerImpl();
   }
 }

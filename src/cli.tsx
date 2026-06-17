@@ -65,7 +65,14 @@ function loadConfig(): Config {
   if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
 
   if (existsSync(CONFIG_PATH)) {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    // Wrap in try/catch — a corrupt or partially-written config file
+    // (e.g. process killed mid-write) would otherwise crash startup
+    // with a SyntaxError. Fall back to defaults and warn the user.
+    try {
+      return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+    } catch (err: any) {
+      console.error(fg(theme.warning || '#f5a742', `Warning: config file at ${CONFIG_PATH} is invalid (${err.message}). Using defaults.`));
+    }
   }
 
   return {

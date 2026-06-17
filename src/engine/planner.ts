@@ -107,15 +107,39 @@ export class Planner {
     return {
       id: nanoid(),
       goal: parsed.goal || input.request,
-      steps: (parsed.steps || []).map((s: any) => ({
-        id: nanoid(),
-        description: s.description || 'unnamed step',
-        tool: s.tool || undefined,
-        args: s.args || {},
-        depends_on: s.depends_on || [],
-        parallel_group: s.parallel_group ?? 0,
-        status: 'pending' as const,
-      })),
+      steps: (() => {
+        // CRITICAL: The LLM returns steps with 1-indexed `id` fields and
+        // `depends_on` arrays that reference those 1-indexed ids (e.g.
+        // `{id: 1, depends_on: [1]}` means "step 1 depends on step 1").
+        // After we rewrite `id` to nanoid(), we must ALSO rewrite
+        // `depends_on` to use 0-indexed array positions — otherwise
+        // `plan.steps[depIdx]` in executeStep accesses the WRONG step
+        // (off-by-one: LLM id 1 → array index 1, which is the SECOND step).
+        // We build a map from LLM-id → array-index and rewrite each
+        // step's depends_on accordingly.
+        const rawSteps = (parsed.steps || []) as any[];
+        const llmIdToIndex = new Map<number, number>();
+        rawSteps.forEach((s, i) => {
+          if (typeof s.id === 'number') {
+            llmIdToIndex.set(s.id, i);  // LLM id 1 → array index 0
+          }
+        });
+        return rawSteps.map((s: any) => ({
+          id: nanoid(),
+          description: s.description || 'unnamed step',
+          tool: s.tool || undefined,
+          args: s.args || {},
+          // Rewrite each depends_on value from LLM-id (1-indexed) to
+          // array-index (0-indexed). If the LLM sent a depends_on value
+          // that doesn't match any step id, drop it (rather than crashing
+          // later with an out-of-bounds access).
+          depends_on: (s.depends_on || [])
+            .map((d: number) => llmIdToIndex.get(d))
+            .filter((d: number | undefined): d is number => typeof d === 'number'),
+          parallel_group: s.parallel_group ?? 0,
+          status: 'pending' as const,
+        }));
+      })(),
       createdAt: Date.now(),
       status: 'planning' as const,
       refinements: 0,

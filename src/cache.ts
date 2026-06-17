@@ -38,6 +38,14 @@ export class ConversationCache<T> {
 
   set(key: string, value: T, ttlMs?: number): void {
     const expires = Date.now() + (ttlMs || this.ttlMs);
+    // LRU: if the key already exists, delete it first so the new
+    // `set` re-inserts at the end (most-recently-used position).
+    // Without this, Map preserves the original insertion order on
+    // overwrite, so updating a key doesn't refresh its LRU position
+    // and it gets evicted too early.
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
     this.cache.set(key, { value, expires });
 
     // LRU eviction
@@ -49,8 +57,20 @@ export class ConversationCache<T> {
     }
   }
 
+  /**
+   * Check if a key exists WITHOUT updating LRU order or hit/miss stats.
+   * The previous implementation called `get()` which moved the key to
+   * the most-recently-used position and incremented counters, skewing
+   * both the eviction order and the cache stats.
+   */
   has(key: string): boolean {
-    return this.get(key) !== null;
+    const entry = this.cache.get(key);
+    if (!entry) return false;
+    if (Date.now() > entry.expires) {
+      this.cache.delete(key);
+      return false;
+    }
+    return true;
   }
 
   delete(key: string): void {

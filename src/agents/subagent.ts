@@ -299,16 +299,39 @@ export class Subagent extends EventEmitter {
 
 export class SubagentOrchestrator {
   private running: Map<string, Subagent> = new Map();
+  // Cap history to prevent unbounded memory growth across the process
+  // lifetime. 200 entries is plenty for inspection via `getHistory()`.
+  private static readonly MAX_HISTORY = 200;
   private history: SubagentResult[] = [];
+
+  // Track cancelled ids so the in-flight `run()` knows to discard its
+  // result instead of pushing it as 'completed'. Without this, cancel()
+  // sets status='cancelled' and removes from `running`, but the
+  // eventually-resolving `run()` promise overwrites the cancellation
+  // by pushing a 'completed' result.
+  private cancelled: Set<string> = new Set();
 
   // Run a subagent synchronously (waits for result)
   async run(opts: SubagentRunOptions): Promise<SubagentResult> {
     const agent = new Subagent(opts.type);
     this.running.set(agent.id, agent);
+    this.cancelled.delete(agent.id);  // clean up any stale entry
 
     const result = await agent.run(opts);
-    this.history.push(result);
     this.running.delete(agent.id);
+
+    // If the agent was cancelled while running, mark the result as
+    // cancelled instead of letting `agent.run()`'s own status win.
+    if (this.cancelled.has(agent.id)) {
+      result.status = 'cancelled';
+      this.cancelled.delete(agent.id);
+    }
+
+    this.history.push(result);
+    // Cap history to MAX_HISTORY entries (evict oldest).
+    if (this.history.length > SubagentOrchestrator.MAX_HISTORY) {
+      this.history = this.history.slice(-SubagentOrchestrator.MAX_HISTORY);
+    }
     return result;
   }
 
@@ -333,6 +356,7 @@ export class SubagentOrchestrator {
     const agent = this.running.get(id);
     if (agent) {
       agent.status = 'cancelled';
+      this.cancelled.add(id);  // signal to `run()` that this was cancelled
       this.running.delete(id);
       return true;
     }

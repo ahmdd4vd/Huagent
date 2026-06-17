@@ -117,7 +117,10 @@ export class MemoryStore {
 
   // Search by content (simple LIKE for now, upgrade to FTS5/embeddings later)
   search(query: string, options: { type?: string; limit?: number } = {}): MemoryEntry[] {
-    const limit = options.limit || 10;
+    // Use ?? instead of || so that `limit: 0` is respected (returns 0
+    // results instead of falling back to 10). The previous code treated
+    // `limit: 0` as falsy and returned 10 results.
+    const limit = options.limit ?? 10;
     const type = options.type;
 
     let sql = `SELECT * FROM memories WHERE content LIKE ?`;
@@ -280,12 +283,24 @@ export class MemoryStore {
   }
 
   private rowToEntry(row: any): MemoryEntry {
+    // CRITICAL: better-sqlite3 may return a Buffer that is a view into a
+    // larger pool ArrayBuffer. Using `new Float32Array(buf.buffer)` reads
+    // the ENTIRE underlying ArrayBuffer, not just the Buffer's bytes —
+    // producing garbage past the BLOB's end. We must respect byteOffset
+    // and byteLength.
+    let embedding: number[] | undefined;
+    if (row.embedding) {
+      const buf = row.embedding as Buffer;
+      embedding = Array.from(
+        new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 4)),
+      );
+    }
     return {
       id: row.id,
       type: row.type,
       content: row.content,
       metadata: JSON.parse(row.metadata),
-      embedding: row.embedding ? Array.from(new Float32Array(row.embedding.buffer)) : undefined,
+      embedding,
       createdAt: row.created_at,
       lastAccessed: row.last_accessed,
       accessCount: row.access_count,

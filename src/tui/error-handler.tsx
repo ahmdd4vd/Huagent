@@ -98,7 +98,14 @@ export function generateSuggestions(error: Error | string, category: ErrorCatego
       ];
 
     case 'file-not-found':
-      const filename = message.match(/['"](.+?)['"]/)?.[1] || 'file';
+      const rawFilename = message.match(/['"](.+?)['"]/)?.[1] || 'file';
+      // SECURITY: shell-escape the filename so users can't copy-paste a
+      // suggestion that runs arbitrary commands. We wrap in single quotes
+      // and escape any embedded single quotes.
+      const filename = `'${rawFilename.replace(/'/g, "'\\''")}'`;
+      // For the find -name pattern, we strip the extension and wrap the
+      // stem in single quotes too (also escaped).
+      const stem = rawFilename.replace(/\.[^.]+$/, '').replace(/'/g, "'\\''");
       return [
         {
           label: 'Check if file exists',
@@ -107,7 +114,7 @@ export function generateSuggestions(error: Error | string, category: ErrorCatego
         },
         {
           label: 'Search for similar files',
-          command: `find . -name "*${filename.replace(/\.[^.]+$/, '')}*" -type f`,
+          command: `find . -name '*${stem}*' -type f`,
           description: 'Find files with similar names',
         },
         {

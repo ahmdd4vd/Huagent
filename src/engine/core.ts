@@ -284,7 +284,11 @@ export class Engine {
     }
 
     this.stats.tasksCompleted++;
-    this.stats.refinements += finalPlan ? finalPlan.refinements : 0;
+    // NOTE: We do NOT add `finalPlan.refinements` to `this.stats.refinements`
+    // here because `stage5_refine` already increments `this.stats.refinements`
+    // directly (see lines ~532-533). Adding it again here would double-count
+    // (N refinements → 2N in stats). The previous code did `this.stats.refinements
+    // += finalPlan.refinements`, which produced inflated counts.
 
     await this.hooks.emit('PostLLMCall', { response, messageCount: this.messages.length, durationMs: Date.now() - startTime });
     await this.hooks.emit('AssistantReply', { response: response.slice(0, 500), sessionId: this.currentSessionId });

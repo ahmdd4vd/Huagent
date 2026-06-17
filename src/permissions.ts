@@ -136,12 +136,20 @@ export class PermissionEnforcer {
       return { allowed: true };
     }
 
-    // Read tools are always allowed
+    // Read-only tools are always allowed in workspace-write mode.
     if (['read', 'search', 'grep', 'list', 'glob', 'web', 'memory'].includes(tool)) {
       return { allowed: true };
     }
 
-    return { allowed: true };
+    // SECURITY: Default-deny for unknown tools. The previous behavior
+    // (`return { allowed: true }`) auto-allowed any tool not in the
+    // explicit list, which means a new tool added to the registry would
+    // bypass permission checks entirely. Unknown tools must be denied
+    // until they're explicitly added to the allowlist above.
+    return {
+      allowed: false,
+      reason: `Tool "${tool}" is not in the workspace-write allowlist. Use danger-full-access mode to allow it.`,
+    };
   }
 
   private async checkWithPrompt(tool: string, args: any): Promise<PermissionResult> {

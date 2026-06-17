@@ -75,6 +75,19 @@ export class LLMClient extends EventEmitter {
           yield* this.anthropicStream(request);
         } else if (this.provider === 'openai') {
           yield* this.openaiStream(request);
+        } else {
+          // CRITICAL: Previously, providers other than 'anthropic'/'openai'
+          // (e.g. 'gemini', 'mistral', 'groq', etc.) fell through BOTH
+          // branches and the stream silently produced nothing — the caller
+          // got an empty response with no error. We now throw so the
+          // caller knows to use the providers/UnifiedClient instead, which
+          // supports all 22 providers via the OpenAI-compat protocol.
+          throw new Error(
+            `LLMClient does not support provider "${this.provider}". ` +
+            `Use UnifiedClient from providers/client.ts instead, which ` +
+            `supports all 22 providers (anthropic, openai, gemini, mistral, ` +
+            `groq, deepseek, openrouter, etc.) via the OpenAI-compat protocol.`,
+          );
         }
         return;
       } catch (err: any) {
@@ -109,30 +122,58 @@ export class LLMClient extends EventEmitter {
     let inputTokens = 0;
     let outputTokens = 0;
 
+    // CRITICAL: Anthropic streams tool_use args as `input_json_delta`
+    // fragments across multiple `content_block_delta` events. The previous
+    // code yielded tool_use at `content_block_start` with `block.input`
+    // (which is `{}` at that point) and IGNORED the `input_json_delta`
+    // events — so tool calls always had empty args. We now accumulate
+    // the fragments per block index and yield the complete tool_use at
+    // `content_block_stop`.
+    const toolArgsBuffer = new Map<number, { id: string; name: string; args: string }>();
+
     for await (const event of stream) {
       const ev = event as any;
       if (ev.type === 'content_block_start') {
         const block = ev.content_block;
+        const blockIdx = ev.index ?? 0;
         if (block?.type === 'thinking') {
           yield { type: 'thinking', content: block.thinking || '' };
         } else if (block?.type === 'tool_use') {
-          yield {
-            type: 'tool_use',
-            tool: { id: block.id, name: block.name, args: block.input || {} },
-          };
+          // Register the tool block; args will be accumulated from
+          // input_json_delta events and flushed at content_block_stop.
+          toolArgsBuffer.set(blockIdx, { id: block.id, name: block.name, args: '' });
         }
       } else if (ev.type === 'content_block_delta') {
         const delta = ev.delta;
+        const blockIdx = ev.index ?? 0;
         if (delta?.type === 'text_delta') {
           textAccum += delta.text;
           yield { type: 'text_delta', delta: delta.text, accumulated: textAccum };
         } else if (delta?.type === 'thinking_delta') {
           yield { type: 'thinking', content: delta.thinking || '' };
         } else if (delta?.type === 'input_json_delta') {
-          // Tool input JSON accumulating — handled by Anthropic SDK
+          // Accumulate tool args JSON fragments for this block.
+          const tool = toolArgsBuffer.get(blockIdx);
+          if (tool && delta.partial_json) {
+            tool.args += delta.partial_json;
+          }
         }
       } else if (ev.type === 'content_block_stop') {
-        // Block finished
+        // Flush the complete tool_use for this block index.
+        const blockIdx = ev.index ?? 0;
+        const tool = toolArgsBuffer.get(blockIdx);
+        if (tool) {
+          let parsedArgs: any = {};
+          if (tool.args) {
+            try { parsedArgs = JSON.parse(tool.args); }
+            catch { parsedArgs = { raw: tool.args }; }
+          }
+          yield {
+            type: 'tool_use',
+            tool: { id: tool.id, name: tool.name, args: parsedArgs },
+          };
+          toolArgsBuffer.delete(blockIdx);
+        }
       } else if (ev.type === 'message_delta') {
         if (ev.usage) {
           outputTokens = ev.usage.output_tokens;
@@ -148,6 +189,21 @@ export class LLMClient extends EventEmitter {
         yield { type: 'usage', input: inputTokens, output: outputTokens, total, cost };
         yield { type: 'message_stop', reason: 'end_turn' };
       }
+    }
+
+    // CRITICAL: If the stream ended without `message_stop` (network error,
+    // abort), flush any tool_use blocks that were started but never
+    // received `content_block_stop`. Without this, tool calls are lost.
+    for (const [_, tool] of toolArgsBuffer) {
+      let parsedArgs: any = {};
+      if (tool.args) {
+        try { parsedArgs = JSON.parse(tool.args); }
+        catch { parsedArgs = { raw: tool.args }; }
+      }
+      yield {
+        type: 'tool_use',
+        tool: { id: tool.id, name: tool.name, args: parsedArgs },
+      };
     }
   }
 
@@ -174,6 +230,11 @@ export class LLMClient extends EventEmitter {
     let textAccum = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    // Track finish_reason separately because with `stream_options.include_usage`,
+    // the usage chunk arrives AFTER the finish_reason chunk with empty
+    // `choices`. The previous code only emitted usage inside the
+    // finish_reason check, so usage was never recorded (always 0).
+    let finishReason: string | null = null;
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content;
@@ -182,19 +243,27 @@ export class LLMClient extends EventEmitter {
         yield { type: 'text_delta', delta, accumulated: textAccum };
       }
 
+      // Capture finish_reason when we see it (but don't emit message_stop
+      // yet — we may still receive a usage chunk after this).
+      if (chunk.choices[0]?.finish_reason) {
+        finishReason = chunk.choices[0].finish_reason;
+      }
+
+      // Capture usage whenever it arrives (could be in any chunk).
       if (chunk.usage) {
         inputTokens = chunk.usage.prompt_tokens || 0;
         outputTokens = chunk.usage.completion_tokens || 0;
       }
-
-      if (chunk.choices[0]?.finish_reason) {
-        const total = inputTokens + outputTokens;
-        const cost = calculateCost(this.model, inputTokens, outputTokens);
-        this.recordUsage(inputTokens, outputTokens, cost);
-        yield { type: 'usage', input: inputTokens, output: outputTokens, total, cost };
-        yield { type: 'message_stop', reason: chunk.choices[0].finish_reason };
-      }
     }
+
+    // Emit usage + message_stop at the END of the stream, so we always
+    // have the final usage numbers (even if they arrived in a separate
+    // chunk after finish_reason).
+    const total = inputTokens + outputTokens;
+    const cost = calculateCost(this.model, inputTokens, outputTokens);
+    this.recordUsage(inputTokens, outputTokens, cost);
+    yield { type: 'usage', input: inputTokens, output: outputTokens, total, cost };
+    yield { type: 'message_stop', reason: finishReason || 'end_turn' };
   }
 
   // Mock streaming - simulates real stream

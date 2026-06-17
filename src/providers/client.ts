@@ -184,37 +184,41 @@ export class UnifiedClient extends EventEmitter {
     let inputTokens = 0;
     let outputTokens = 0;
 
-    // Accumulate tool_use args across input_json_delta events
+    // Accumulate tool_use args across input_json_delta events.
+    // Anthropic's content_block_start/stop events include an `index` field
+    // that identifies WHICH block the event refers to. We key the buffer
+    // by that index so multiple concurrent tool_use blocks flush correctly.
     const toolArgsBuffer = new Map<number, { id: string; name: string; args: string }>();
-    let currentToolIndex = -1;
 
     for await (const event of stream) {
       const ev = event as any;
       if (ev.type === 'content_block_start') {
         const block = ev.content_block;
+        const blockIdx = ev.index ?? 0;
         if (block?.type === 'thinking') {
           yield { type: 'thinking', content: block.thinking || '' };
         } else if (block?.type === 'tool_use') {
-          currentToolIndex++;
-          toolArgsBuffer.set(currentToolIndex, { id: block.id, name: block.name, args: '' });
+          toolArgsBuffer.set(blockIdx, { id: block.id, name: block.name, args: '' });
         }
       } else if (ev.type === 'content_block_delta') {
         const delta = ev.delta;
+        const blockIdx = ev.index ?? 0;
         if (delta?.type === 'text_delta') {
           textAccum += delta.text;
           yield { type: 'text_delta', delta: delta.text, accumulated: textAccum };
         } else if (delta?.type === 'thinking_delta') {
           yield { type: 'thinking', content: delta.thinking || '' };
         } else if (delta?.type === 'input_json_delta') {
-          // Accumulate tool args JSON fragments
-          const tool = toolArgsBuffer.get(currentToolIndex);
+          // Accumulate tool args JSON fragments for the CURRENT block.
+          const tool = toolArgsBuffer.get(blockIdx);
           if (tool && delta.partial_json) {
             tool.args += delta.partial_json;
           }
         }
       } else if (ev.type === 'content_block_stop') {
-        // Flush accumulated tool_use block
-        const tool = toolArgsBuffer.get(currentToolIndex);
+        // Flush accumulated tool_use block for THIS specific index.
+        const blockIdx = ev.index ?? 0;
+        const tool = toolArgsBuffer.get(blockIdx);
         if (tool) {
           yield {
             type: 'tool_use',
@@ -222,6 +226,7 @@ export class UnifiedClient extends EventEmitter {
             name: tool.name,
             args: this.parseToolArgs(tool.args),
           };
+          toolArgsBuffer.delete(blockIdx);  // free the entry
         }
       } else if (ev.type === 'message_delta') {
         if (ev.usage) outputTokens = ev.usage.output_tokens || outputTokens;
@@ -234,6 +239,19 @@ export class UnifiedClient extends EventEmitter {
         yield { type: 'usage', input: inputTokens, output: outputTokens, total, cost };
         yield { type: 'message_stop', reason: 'end_turn' };
       }
+    }
+
+    // CRITICAL: If the stream ended without a `message_stop` (e.g. due to
+    // a network error or abort), flush any tool_use blocks that were
+    // started but never received a content_block_stop. Without this, tool
+    // calls are silently lost.
+    for (const [_, tool] of toolArgsBuffer) {
+      yield {
+        type: 'tool_use',
+        id: tool.id,
+        name: tool.name,
+        args: this.parseToolArgs(tool.args),
+      };
     }
   }
 
@@ -341,6 +359,21 @@ export class UnifiedClient extends EventEmitter {
         yield { type: 'usage', input: inputTokens, output: outputTokens, total, cost };
         yield { type: 'message_stop', reason: chunk.choices[0].finish_reason };
       }
+    }
+
+    // CRITICAL: If the stream ended without a `finish_reason` chunk
+    // (network error, abort, or a provider that doesn't send it), flush
+    // any accumulated tool calls so they aren't silently lost.
+    if (toolCallAccumulator.size > 0) {
+      for (const [idx, acc] of toolCallAccumulator.entries()) {
+        yield {
+          type: 'tool_use',
+          id: acc.id || `tool-${Date.now()}-${idx}`,
+          name: acc.name || 'unknown',
+          args: this.parseToolArgs(acc.args),
+        };
+      }
+      toolCallAccumulator.clear();
     }
   }
 

@@ -899,8 +899,26 @@ function cmdResume(args: string[], ctx: SlashCommandContext): SlashCommandResult
 }
 
 async function cmdExport(args: string[], ctx: SlashCommandContext): Promise<SlashCommandResult> {
-  const filename = args[0] || `huagent-session-${new Date().toISOString().slice(0, 10)}.md`;
-  const path = join(process.cwd(), filename);
+  // SECURITY: Validate the filename to prevent path traversal. Without
+  // this, `/export ../../etc/cron.d/exploit` would write to an arbitrary
+  // path outside the workspace.
+  const rawFilename = args[0] || `huagent-session-${new Date().toISOString().slice(0, 10)}.md`;
+  // Reject filenames that contain path separators or parent-dir references.
+  if (/[\/\\]/.test(rawFilename) || rawFilename === '..' || rawFilename.includes('..')) {
+    return {
+      handled: true,
+      message: `Invalid filename: ${JSON.stringify(rawFilename)} (path separators and ".." are not allowed)`,
+    };
+  }
+  // Resolve against cwd and verify the final path stays within cwd.
+  const path = join(process.cwd(), rawFilename);
+  const cwd = process.cwd();
+  if (!path.startsWith(cwd + '/') && path !== cwd && !path.startsWith(cwd + '\\')) {
+    return {
+      handled: true,
+      message: `Refusing to write outside workspace: ${path}`,
+    };
+  }
 
   let content = `# huagent session\n\n`;
   content += `**Date:** ${new Date().toISOString()}\n`;
@@ -910,12 +928,18 @@ async function cmdExport(args: string[], ctx: SlashCommandContext): Promise<Slas
 
   for (const msg of ctx.messages) {
     const role = msg.role === 'user' ? '🌸 You' : msg.role === 'assistant' ? '✧ Hua' : `🔧 ${msg.role}`;
-    content += `## ${role}\n\n${msg.content}\n\n`;
+    // Coerce content to string in case it's an Anthropic-style content array.
+    const text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content ?? '');
+    content += `## ${role}\n\n${text}\n\n`;
   }
 
-  const { writeFile } = await import('node:fs/promises');
-  await writeFile(path, content, 'utf-8');
-  return { handled: true, message: `${mascots.smallHua} ${fg(theme.success, '✓ Exported to ' + path)}` };
+  try {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(path, content, 'utf-8');
+    return { handled: true, message: `${mascots.smallHua} ${fg(theme.success, '✓ Exported to ' + path)}` };
+  } catch (err: any) {
+    return { handled: true, message: `Export failed: ${err.message}` };
+  }
 }
 
 function cmdUndo(): SlashCommandResult {

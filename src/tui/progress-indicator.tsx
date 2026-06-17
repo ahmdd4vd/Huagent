@@ -96,13 +96,15 @@ export const ProgressIndicator: React.FC<ProgressIndicatorProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  const percentage = Math.round((current / total) * 100);
+  // Guard against division by zero when total === 0.
+  const pct = total > 0 ? current / total : 0;
+  const percentage = Math.round(pct * 100);
   const elapsed = now - startTime;
   const eta = calculateETA(current, total, elapsed);
 
   // Progress bar (25 chars wide)
   const barWidth = 25;
-  const filled = Math.round((current / total) * barWidth);
+  const filled = Math.round(pct * barWidth);
   const empty = barWidth - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
 
@@ -148,8 +150,10 @@ export const SimpleProgressBar: React.FC<{
   total: number;
   color?: string;
 }> = ({ current, total, color = theme.info }) => {
-  const percentage = Math.round((current / total) * 100);
-  const filled = Math.round((current / total) * 25);
+  // Guard against division by zero.
+  const pct = total > 0 ? current / total : 0;
+  const percentage = Math.round(pct * 100);
+  const filled = Math.round(pct * 25);
   const empty = 25 - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
 
@@ -169,13 +173,15 @@ export const StepIndicator: React.FC<{
   total: number;
   label?: string;
 }> = ({ current, total, label = 'Step' }) => {
+  // Guard against division by zero.
+  const pct = total > 0 ? current / total : 0;
   return (
     <Box>
       <Text color={theme.fg}>
         {label} {current} of {total}
       </Text>
       <Text color={theme.fgSubtle}>
-        {' '}({Math.round((current / total) * 100)}%)
+        {' '}({Math.round(pct * 100)}%)
       </Text>
     </Box>
   );
