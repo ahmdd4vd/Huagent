@@ -356,14 +356,15 @@ export class Engine {
 
   /** Build system prompt with token budget management. */
   private buildSystemPrompt(projectContext: string, memoryContext: string): string {
-    // PERF: Minimal system prompt. The previous prompt included the full
-    // `prompts.coder` text (~500 tokens), workflow description, and verbose
-    // tool list — totaling ~2000+ tokens just for the system prompt. That
-    // added 2-5s latency on every single LLM call. OpenCode uses a ~200
-    // token system prompt. We follow the same approach: keep it short.
     const toolsList = this.tools.list().map(t => `  - ${t.name}: ${t.description.split('\n')[0]}`).join('\n');
 
-    let prompt = `You are Hua, an AI coding agent.${projectContext ? ` Working in: ${projectContext}` : ''}${memoryContext}
+    // Detect platform for the system prompt
+    const isWindows = process.platform === 'win32';
+    const platformInfo = isWindows
+      ? `\nPlatform: Windows. The bash tool auto-translates Unix commands (ls→dir, cat→type, grep→findstr). You can use Unix commands directly.`
+      : `\nPlatform: ${process.platform}.`;
+
+    let prompt = `You are Hua, an AI coding agent.${projectContext ? ` Working in: ${projectContext}` : ''}${platformInfo}${memoryContext}
 
 You have tools available. USE THEM to take action — don't just talk about what you would do. When the user asks you to install, run, read, write, search, or execute something, call the appropriate tool immediately.
 
