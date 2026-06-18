@@ -271,28 +271,61 @@ export class UnifiedClient extends EventEmitter {
 
     const modelId = req.model || this.getModel();
 
+    // CRITICAL FIX: Convert huagent's raw tool schemas to OpenAI format.
+    // OpenAI expects: { type: "function", function: { name, description, parameters: {...} } }
+    // Huagent stores: { type: "object", properties: {...}, required: [...] }
+    // Without this conversion, tools are never sent to the LLM, so it
+    // can't call bash/read/write/etc.
+    const openaiTools = req.tools?.map((t: any) => {
+      // If already in OpenAI format, pass through
+      if (t.type === 'function' && t.function) return t;
+      // Otherwise, wrap in OpenAI format
+      return {
+        type: 'function' as const,
+        function: {
+          name: t.name || t.toolName || 'unknown',
+          description: t.description || '',
+          parameters: {
+            type: t.type || 'object',
+            properties: t.properties || {},
+            required: t.required || [],
+          },
+        },
+      };
+    });
+
+    // Build request options — include tools if we have them
+    const createOptions: any = {
+      model: modelId,
+      messages,
+      temperature: req.temperature ?? 0.7,
+      max_tokens: req.maxTokens || 4096,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+    if (openaiTools && openaiTools.length > 0) {
+      createOptions.tools = openaiTools;
+      // Let the model decide when to call tools
+      createOptions.tool_choice = 'auto';
+    }
+
     // Some OpenAI-compat providers don't support `stream_options.include_usage`.
     // Try with it first; if the API rejects, retry without.
     let stream: any;
     try {
-      stream = await client.chat.completions.create({
-        model: modelId,
-        messages,
-        temperature: req.temperature ?? 0.7,
-        max_tokens: req.maxTokens || 4096,
-        stream: true,
-        stream_options: { include_usage: true },
-      });
+      stream = await client.chat.completions.create(createOptions);
     } catch (e: any) {
       // Some providers reject stream_options — fall back
       if (e?.status === 400 || e?.code === 'invalid_request_error' || /stream_options/i.test(e?.message || '')) {
-        stream = await client.chat.completions.create({
-          model: modelId,
-          messages,
-          temperature: req.temperature ?? 0.7,
-          max_tokens: req.maxTokens || 4096,
-          stream: true,
-        });
+        const fallbackOpts = { ...createOptions };
+        delete fallbackOpts.stream_options;
+        stream = await client.chat.completions.create(fallbackOpts);
+      } else if (e?.status === 400 && /tool/i.test(e?.message || '')) {
+        // Provider doesn't support tools — retry without them
+        const noToolOpts = { ...createOptions };
+        delete noToolOpts.tools;
+        delete noToolOpts.tool_choice;
+        stream = await client.chat.completions.create(noToolOpts);
       } else {
         throw e;
       }

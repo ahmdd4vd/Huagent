@@ -209,24 +209,39 @@ export class PermissionEnforcer {
       return { allowed: true };
     }
 
+    // CRITICAL FIX: 'unknown' commands (like `npx skills add`, `npm install`,
+    // `pip install`, etc.) were being DENIED in workspace-write mode, which
+    // made huagent say "I can't access the terminal" or "I don't have
+    // permission". This is the #1 user complaint. OpenCode allows all
+    // non-destructive commands in workspace-write mode. We now allow
+    // 'unknown' commands in workspace-write mode — only block in read-only.
     if (classification === 'unknown') {
-      // Unknown commands need higher permission
-      if (this.context.mode === 'workspace-write') {
+      if (this.context.mode === 'read-only') {
         return {
           allowed: false,
-          reason: `Unknown command classification for: ${command.slice(0, 100)}. Use a more permissive mode or be more specific.`,
-          requiredMode: 'danger-full-access',
+          reason: `Command not classified as read-only: ${command.slice(0, 100)}`,
+          requiredMode: 'workspace-write',
         };
       }
+      // workspace-write, sandboxed, danger-full-access, allow → all permit unknown
       return { allowed: true };
     }
 
-    // Mutating command
+    // Mutating command (write, package, network, process, system)
     if (this.context.mode === 'read-only') {
       return {
         allowed: false,
         reason: `Bash command '${command.slice(0, 100)}' may modify state (${classification})`,
         requiredMode: 'workspace-write',
+      };
+    }
+
+    // For destructive commands, still require danger-full-access
+    if (classification === 'destructive' && this.context.mode !== 'danger-full-access' && this.context.mode !== 'allow') {
+      return {
+        allowed: false,
+        reason: `Destructive command detected: ${command.slice(0, 100)}`,
+        requiredMode: 'danger-full-access',
       };
     }
 
@@ -274,7 +289,8 @@ const PROCESS_COMMANDS = new Set([
 
 const PACKAGE_COMMANDS = new Set([
   'apt', 'apt-get', 'yum', 'dnf', 'pacman', 'brew', 'snap', 'flatpak',
-  'pip', 'pip3', 'npm', 'yarn', 'pnpm', 'bun', 'cargo', 'gem', 'go install',
+  'pip', 'pip3', 'npm', 'yarn', 'pnpm', 'bun', 'cargo', 'gem', 'go',
+  'npx', 'tsx', 'deno', 'rustup', 'volta', 'nvm', 'fnm', 'volta',
 ]);
 
 const SYSTEM_COMMANDS = new Set([

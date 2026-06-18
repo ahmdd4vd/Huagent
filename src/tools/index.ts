@@ -68,7 +68,15 @@ export class ToolRegistry {
   }
 
   getSchemas(): any[] {
-    return this.list().map((t) => t.schema);
+    // Return schemas with name + description included, so the OpenAI
+    // format converter in client.ts can find them. The raw schema
+    // stored on each tool only has { type, properties, required } —
+    // we merge in the tool name and description here.
+    return this.list().map((t) => ({
+      ...t.schema,
+      name: t.name,
+      description: t.description,
+    }));
   }
 
   async execute(name: string, args: any): Promise<ToolExecutionResult> {
