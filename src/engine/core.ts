@@ -205,7 +205,8 @@ export class Engine {
   async process(userMessage: string, projectContext: string = ''): Promise<string> {
     const startTime = Date.now();
 
-    await this.hooks.emit('UserPrompt', { message: userMessage, sessionId: this.currentSessionId });
+    // PERF: Fire hooks without await — they shouldn't block the LLM call.
+    this.hooks.emit('UserPrompt', { message: userMessage, sessionId: this.currentSessionId }).catch(() => {});
 
     const userMsg: Message = {
       id: nanoid(),
@@ -219,11 +220,15 @@ export class Engine {
     // STAGE 1: UNDERSTAND
     const understand = await this.stage1_understand(userMessage, projectContext);
 
-    // Memory pressure check
-    const memStats = estimateMemory(this.messages, this.systemPrompt);
-    const pressure = shouldCompact(memStats);
-    if (pressure !== 'none') {
-      await this.compactMemory(pressure);
+    // PERF: Skip memory pressure check for short conversations (< 20 messages).
+    // The check itself is fast, but shouldCompact + compactMemory can trigger
+    // expensive summary generation. For typical chat sessions, this is wasted work.
+    if (this.messages.length > 20) {
+      const memStats = estimateMemory(this.messages, this.systemPrompt);
+      const pressure = shouldCompact(memStats);
+      if (pressure !== 'none') {
+        await this.compactMemory(pressure);
+      }
     }
 
     let response: string;
@@ -298,8 +303,9 @@ export class Engine {
     // (N refinements → 2N in stats). The previous code did `this.stats.refinements
     // += finalPlan.refinements`, which produced inflated counts.
 
-    await this.hooks.emit('PostLLMCall', { response, messageCount: this.messages.length, durationMs: Date.now() - startTime });
-    await this.hooks.emit('AssistantReply', { response: response.slice(0, 500), sessionId: this.currentSessionId });
+    // PERF: Fire post-call hooks without await.
+    this.hooks.emit('PostLLMCall', { response, messageCount: this.messages.length, durationMs: Date.now() - startTime }).catch(() => {});
+    this.hooks.emit('AssistantReply', { response: response.slice(0, 500), sessionId: this.currentSessionId }).catch(() => {});
 
     return response;
   }
@@ -513,12 +519,17 @@ ${toolsList}`;
   /** Format a tool result for inclusion in conversation context. */
   private formatToolResult(toolName: string, result: any): string {
     if (!result) return 'no result';
-    if (typeof result === 'string') return result.slice(0, 500);
+    // PERF: Increased from 500 to 5000 chars. The previous 500-char limit
+    // was too aggressive — file contents, bash output, and search results
+    // were truncated so heavily that the LLM couldn't see enough context
+    // to act on them. OpenCode sends up to 10k chars to the LLM.
+    const MAX_RESULT = 5000;
+    if (typeof result === 'string') return result.slice(0, MAX_RESULT);
     if (result.error) return `ERROR: ${result.error}`;
-    if (result.content) return String(result.content).slice(0, 500);
-    if (result.stdout) return result.stdout.slice(0, 500);
-    if (result.output) return String(result.output).slice(0, 500);
-    return JSON.stringify(result).slice(0, 500);
+    if (result.content) return String(result.content).slice(0, MAX_RESULT);
+    if (result.stdout) return result.stdout.slice(0, MAX_RESULT);
+    if (result.output) return String(result.output).slice(0, MAX_RESULT);
+    return JSON.stringify(result).slice(0, MAX_RESULT);
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -679,6 +690,12 @@ ${toolsList}`;
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const pendingToolCalls: Array<{ id: string; name: string; args: any }> = [];
       let roundResponse = '';
+
+      // Clear streaming text between rounds so the TUI doesn't show
+      // the previous round's text while tools are executing.
+      if (round > 0) {
+        this.options.onEvent({ type: 'stream_delta', delta: '', accumulated: '' });
+      }
 
       // CRITICAL FIX: Properly format messages for OpenAI API.
       // Previously, messages were mapped to just { role, content },

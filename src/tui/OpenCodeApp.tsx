@@ -282,11 +282,26 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
       }
 
       case 'tool_call': {
-        // A tool call arrived during streaming. Add it as an inline tool
-        // card to the current streaming message (or create one if this
-        // is the first event).
+        // A tool call arrived during streaming. Clear streaming text
+        // (the LLM's text response for this round is done; it's now
+        // calling a tool). Add the tool card inline.
         const call = (event as any).call;
         if (!call) break;
+
+        // Finalize current streaming text into the streaming message
+        // before adding the tool call, so the text isn't lost.
+        const currentText = streamingText;
+        if (currentText) {
+          const msgId = streamingMsgIdRef.current;
+          if (msgId) {
+            setMessages((m) => m.map((mm) =>
+              mm.id === msgId ? { ...mm, content: currentText } : mm
+            ));
+          }
+        }
+        // Clear streaming display — tool call is next
+        setStreamingText('');
+        setIsStreaming(false);
 
         // If we're streaming, add the tool call to a new assistant message
         // that will be finalized when streaming ends. For now, show it as

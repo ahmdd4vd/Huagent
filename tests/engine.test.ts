@@ -90,7 +90,7 @@ section("3. Tool Result Formatting");
   test("format error result", (engine as any).formatToolResult('read', { error: 'File not found' }) === 'ERROR: File not found');
   test("format object with content", (engine as any).formatToolResult('bash', { content: 'output' }) === 'output');
   test("format object with stdout", (engine as any).formatToolResult('bash', { stdout: 'command output' }) === 'command output');
-  test("truncate long results to 500 chars", (engine as any).formatToolResult('read', 'a'.repeat(1000)).length === 500);
+  test("truncate long results to 5000 chars", (engine as any).formatToolResult('read', 'a'.repeat(10000)).length === 5000);
   test("format null result", (engine as any).formatToolResult('read', null) === 'no result');
   test("format empty object", (engine as any).formatToolResult('bash', {}) === '{}');
 }

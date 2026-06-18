@@ -171,13 +171,39 @@ export class UnifiedClient extends EventEmitter {
 
     const modelId = req.model || this.getModel();
 
+    // Convert tools to Anthropic format if needed.
+    // Anthropic expects: { name, description, input_schema: { type, properties, required } }
+    // Huagent stores: { name, description, type, properties, required }
+    const anthropicTools = req.tools?.map((t: any) => {
+      // If already in Anthropic format (has input_schema), pass through
+      if (t.input_schema) return t;
+      // If in OpenAI format, convert
+      if (t.type === 'function' && t.function) {
+        return {
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters,
+        };
+      }
+      // Otherwise, convert from raw huagent schema
+      return {
+        name: t.name || 'unknown',
+        description: t.description || '',
+        input_schema: {
+          type: t.type || 'object',
+          properties: t.properties || {},
+          required: t.required || [],
+        },
+      };
+    });
+
     const stream = await client.messages.stream({
       model: modelId,
       max_tokens: req.maxTokens || 4096,
       temperature: req.temperature ?? 0.7,
       system: req.system || 'You are Hua, a helpful AI coding agent.',
       messages,
-      tools: req.tools as any,
+      tools: anthropicTools as any,
     });
 
     let textAccum = '';
