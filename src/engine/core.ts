@@ -149,10 +149,14 @@ export class Engine {
     this.reflector = new Reflector(this.memory as any);
     this.options = {
       maxRefinements: options.maxRefinements ?? 3,
-      enableCritic: options.enableCritic ?? true,
-      enablePlanning: options.enablePlanning ?? true,
-      enableSubagents: options.enableSubagents ?? true,
-      enableReflection: options.enableReflection ?? true,
+      // PERF: Disable planning/critic/reflection by default for speed.
+      // These add 3-4 extra LLM calls per task (2-10s each). OpenCode
+      // doesn't use them — it streams directly with tools. Enable
+      // explicitly via options for workflows that need them.
+      enableCritic: options.enableCritic ?? false,
+      enablePlanning: options.enablePlanning ?? false,
+      enableSubagents: options.enableSubagents ?? false,
+      enableReflection: options.enableReflection ?? false,
       maxSteps: options.maxSteps ?? 15,
       criticModel: options.criticModel ?? '',
       systemPromptBudget: options.systemPromptBudget ?? 8000,
@@ -306,37 +310,35 @@ export class Engine {
   private async stage1_understand(message: string, projectContext: string): Promise<{ taskType: TaskType; complexity: ComplexityLevel; needsSubagent: boolean }> {
     this.options.onEvent({ type: 'stage', stage: STAGES[0], status: 'start' });
 
-    // Fast path: regex classification
+    // Fast path: regex classification only. NEVER call LLM for task
+    // classification — that's an extra 2-5s round-trip. OpenCode doesn't
+    // classify tasks at all; it just streams. We classify for stats/memory
+    // but use regex only. 'unknown' is treated as 'question'.
     let taskType = this.detectTaskTypeRegex(message);
-
-    // If regex returned 'unknown', DON'T immediately call the LLM for
-    // classification — that's an extra LLM round-trip that adds 2-5s
-    // latency for every ambiguous message. Instead, treat 'unknown' as
-    // 'question' for short messages (under 100 chars), which routes to
-    // the fast chat path. Only call the LLM classifier for longer
-    // ambiguous messages where the distinction actually matters.
-    if (taskType === 'unknown') {
-      if (message.length < 100) {
-        // Short ambiguous message → treat as question (fast path)
-        taskType = 'question';
-      } else {
-        // Long ambiguous message → worth the LLM call to classify
-        taskType = await this.detectTaskTypeLLM(message);
-      }
-    }
+    if (taskType === 'unknown') taskType = 'question';
 
     const complexity = this.detectComplexity(message, taskType);
     const needsSubagent = this.shouldUseSubagent(taskType, complexity, message);
 
-    // Recall relevant memories
-    const relevantMemories = await Promise.resolve(this.memory.recall(message, 5));
-    const memoryContext = relevantMemories.length > 0
-      ? `\n## What I Remember\n${relevantMemories.map(m => `- [${m.type}] ${m.content.slice(0, 200)}`).join('\n')}\n`
-      : '';
+    // PERF: Memory recall can be slow (SQLite query). Only do it if the
+    // memory store has entries. For fresh sessions with 0 memories, skip
+    // the query entirely.
+    let memoryContext = '';
+    try {
+      const memStats = await Promise.resolve(this.memory.stats?.());
+      if (memStats && ((memStats as any).memories > 0 || (memStats as any).skills > 0)) {
+        const relevantMemories = await Promise.resolve(this.memory.recall(message, 3));
+        if (relevantMemories.length > 0) {
+          memoryContext = `\nRelevant memories:\n${relevantMemories.map(m => `- ${m.content.slice(0, 150)}`).join('\n')}\n`;
+        }
+      }
+    } catch {
+      // Memory recall failed — continue without it.
+    }
 
     this.options.onEvent({
       type: 'thinking',
-      content: `🧠 Task: ${taskType} | Complexity: ${complexity} | Subagent: ${needsSubagent ? 'yes' : 'no'} | Memories: ${relevantMemories.length}`
+      content: `Task: ${taskType} | Complexity: ${complexity}${memoryContext ? ' | Memories: yes' : ''}`
     });
 
     // Build system prompt with token budget awareness
@@ -348,39 +350,31 @@ export class Engine {
 
   /** Build system prompt with token budget management. */
   private buildSystemPrompt(projectContext: string, memoryContext: string): string {
+    // PERF: Minimal system prompt. The previous prompt included the full
+    // `prompts.coder` text (~500 tokens), workflow description, and verbose
+    // tool list — totaling ~2000+ tokens just for the system prompt. That
+    // added 2-5s latency on every single LLM call. OpenCode uses a ~200
+    // token system prompt. We follow the same approach: keep it short.
     const toolsList = this.tools.list().map(t => `  - ${t.name}: ${t.description.split('\n')[0]}`).join('\n');
 
-    let prompt = `You are Hua, an AI coding agent working in ${projectContext || 'a project'}.${memoryContext}
+    let prompt = `You are Hua, an AI coding agent.${projectContext ? ` Working in: ${projectContext}` : ''}${memoryContext}
 
-${prompts.coder}
-
-Workflow:
-1. UNDERSTAND what user really wants
-2. PLAN the steps with the right tools
-3. EXECUTE step by step
-4. VERIFY (correctness, completeness, quality, safety, efficiency)
-5. REFINE if needed
-6. REFLECT and learn
+You have these tools. Call them by emitting tool_use blocks. Stream your response.
 
 Available tools:
 ${toolsList}
 
-Be concise. Show your work. Ship working code, not promises.`;
+Be helpful, concise, and direct. Use tools when needed. Show results clearly.`;
 
     // Token budget: trim if too long
     const budget = this.options.systemPromptBudget;
     const estimated = estimateTokens(prompt);
     if (estimated > budget) {
-      // Trim memory context first, then tool descriptions
-      const trimmedMemory = memoryContext.slice(0, Math.max(0, budget - estimated + memoryContext.length));
-      prompt = `You are Hua, an AI coding agent working in ${projectContext || 'a project'}.${trimmedMemory}
-
-${prompts.coder}
+      // Trim to bare minimum — just the agent identity + tool list.
+      prompt = `You are Hua, a coding agent. Use tools when needed. Be concise.
 
 Available tools:
-${toolsList}
-
-Be concise. Ship working code.`;
+${toolsList}`;
     }
 
     return prompt;
