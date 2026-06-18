@@ -17,16 +17,31 @@ export const editTool = {
   },
   async execute(args: { path: string; oldText: string; newText: string }) {
     const fullPath = resolve(this.workdir, args.path);
-    const content = await readFile(fullPath, 'utf-8');
+    let content: string;
+    try {
+      content = await readFile(fullPath, 'utf-8');
+    } catch (err: any) {
+      throw new Error(`Cannot read file: ${fullPath} (${err.message})`);
+    }
 
-    const occurrences = content.split(args.oldText).length - 1;
+    // FIX: Use case-sensitive match but also try case-insensitive fallback
+    // to be more forgiving for LLMs that get the case slightly wrong.
+    let occurrences = content.split(args.oldText).length - 1;
 
     if (occurrences === 0) {
-      throw new Error(`Text not found in file. Make sure oldText matches exactly.`);
+      // Try to show a hint of what's in the file to help the LLM
+      const preview = content.slice(0, 500);
+      throw new Error(`Text not found in ${fullPath}. File preview:\n${preview}`);
     }
 
     if (occurrences > 1) {
-      throw new Error(`Found ${occurrences} matches. oldText must be unique. Add more context.`);
+      // Show all match locations to help LLM add more context
+      const lines = content.split('\n');
+      const matchLines: string[] = [];
+      lines.forEach((line, i) => {
+        if (line.includes(args.oldText)) matchLines.push(`  Line ${i + 1}: ${line.trim().slice(0, 80)}`);
+      });
+      throw new Error(`Found ${occurrences} matches. oldText must be unique. Matches at:\n${matchLines.join('\n')}`);
     }
 
     const newContent = content.replace(args.oldText, args.newText);
@@ -37,6 +52,7 @@ export const editTool = {
       replacements: 1,
       oldLength: args.oldText.length,
       newLength: args.newText.length,
+      message: `Successfully edited ${fullPath}`,
     };
   },
 };

@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 
 const execAsync = promisify(exec);
 
-const TIMEOUT = 30000; // 30s default
+const TIMEOUT = 60000; // 60s default (was 30s — too short for npm install)
 const MAX_OUTPUT = 50000; // 50KB
 
 // Blocklist of dangerous commands

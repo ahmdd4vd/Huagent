@@ -369,21 +369,51 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
   if (message) {
     console.log(`\n${fg(theme.textMuted, '⠋ streaming...')}\n`);
     let fullResponse = '';
-    for await (const event of client.stream({
-      model: config.model || client.getModel(),
-      system: 'You are Hua, an anime-powered AI coding agent. Be helpful, magical, and concise.',
-      messages: [{ role: 'user', content: message }],
-      temperature: 0.7,
-    })) {
-      if (event.type === 'text_delta') {
-        process.stdout.write(event.delta);
-        fullResponse = event.accumulated;
-      } else if (event.type === 'usage') {
-        setTimeout(() => {
-          console.log(`\n\n${fg(theme.fgDim, `[${event.total} tokens, $${event.cost.toFixed(4)}]`)}`);
-        }, 100);
-      } else if (event.type === 'message_stop') {
-        process.stdout.write('\n');
+    // FIX: one-shot mode now sends tools + handles tool_use events.
+    // Previously it was chat-only (no tools), so 'install X' or 'read file'
+    // commands just got a text response with no action.
+    const oneShotMessages: any[] = [{ role: 'user', content: message }];
+    const MAX_ONE_SHOT_ROUNDS = 5;
+
+    for (let round = 0; round < MAX_ONE_SHOT_ROUNDS; round++) {
+      const pendingToolCalls: Array<{ id: string; name: string; args: any }> = [];
+      fullResponse = '';
+
+      for await (const event of client.stream({
+        model: config.model || client.getModel(),
+        system: 'You are Hua, an AI coding agent. Use tools when needed. Be concise.',
+        messages: oneShotMessages,
+        tools: tools.getSchemas(),
+        temperature: 0.7,
+      })) {
+        if (event.type === 'text_delta') {
+          process.stdout.write(event.delta);
+          fullResponse = event.accumulated;
+        } else if (event.type === 'tool_use') {
+          pendingToolCalls.push({ id: event.id, name: event.name, args: event.args });
+        } else if (event.type === 'usage') {
+          setTimeout(() => {
+            console.log(`\n\n${fg(theme.fgDim, `[${event.total} tokens, $${event.cost.toFixed(4)}]`)}`);
+          }, 100);
+        } else if (event.type === 'message_stop') {
+          process.stdout.write('\n');
+        }
+      }
+
+      // No tool calls → done
+      if (pendingToolCalls.length === 0) break;
+
+      // Execute tools and feed results back
+      oneShotMessages.push({ role: 'assistant', content: fullResponse, tool_calls: pendingToolCalls.map(tc => ({
+        id: tc.id, type: 'function', function: { name: tc.name, arguments: JSON.stringify(tc.args || {}) },
+      })) });
+
+      for (const tc of pendingToolCalls) {
+        console.log(fg(theme.textMuted, `  → ${tc.name}`));
+        const execResult = await tools.execute(tc.name, tc.args);
+        const result = execResult.success ? execResult.result : { error: execResult.error };
+        const resultStr = typeof result === 'string' ? result.slice(0, 2000) : JSON.stringify(result).slice(0, 2000);
+        oneShotMessages.push({ role: 'tool', content: resultStr, tool_call_id: tc.id });
       }
     }
 
