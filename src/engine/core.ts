@@ -671,19 +671,48 @@ ${toolsList}`;
    */
   private async streamAgenticChat(): Promise<string> {
     this.options.onEvent({ type: 'stage', stage: STAGES[2], status: 'start' });
-    this.options.onEvent({ type: 'thinking', content: '💭 Thinking...' });
+    this.options.onEvent({ type: 'thinking', content: 'thinking' });
 
     let fullResponse = '';
-    const MAX_TOOL_ROUNDS = 5;
+    const MAX_TOOL_ROUNDS = 10;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const pendingToolCalls: Array<{ id: string; name: string; args: any }> = [];
       let roundResponse = '';
 
+      // CRITICAL FIX: Properly format messages for OpenAI API.
+      // Previously, messages were mapped to just { role, content },
+      // which STRIPPED tool_calls from assistant messages and
+      // tool_call_id from tool messages. The LLM couldn't see the
+      // conversation history with tools → it got confused and refused
+      // to call tools in subsequent rounds.
+      const apiMessages = this.messages.map((m) => {
+        const msg: any = { role: m.role, content: m.content };
+
+        // Include tool_calls for assistant messages that have them
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          msg.tool_calls = m.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: {
+              name: tc.name,
+              arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || {}),
+            },
+          }));
+        }
+
+        // Include tool_call_id for tool role messages
+        if (m.role === 'tool' && m.toolCallId) {
+          msg.tool_call_id = m.toolCallId;
+        }
+
+        return msg;
+      });
+
       for await (const event of this.client.stream({
         model: this.client.getModel(),
         system: this.systemPrompt,
-        messages: this.messages.map((m) => ({ role: m.role as any, content: m.content })) as any,
+        messages: apiMessages,
         tools: this.tools.getSchemas(),
         temperature: 0.7,
       })) {
@@ -692,6 +721,11 @@ ${toolsList}`;
           this.options.onEvent({ type: 'stream_delta', delta: event.delta, accumulated: event.accumulated });
         } else if (event.type === 'tool_use') {
           pendingToolCalls.push({ id: event.id, name: event.name, args: event.args });
+          // Emit tool_call event immediately so TUI shows it inline
+          this.options.onEvent({
+            type: 'tool_call',
+            call: { id: event.id, name: event.name, args: event.args },
+          });
         } else if (event.type === 'message_stop') {
           break;
         } else if (event.type === 'error') {
@@ -704,7 +738,7 @@ ${toolsList}`;
       // If no tool calls, we're done — LLM gave a final answer
       if (pendingToolCalls.length === 0) break;
 
-      // Add assistant message with tool calls to conversation
+      // Add assistant message with tool calls to conversation history
       this.messages.push({
         id: nanoid(),
         role: 'assistant',
@@ -716,26 +750,30 @@ ${toolsList}`;
       // Execute tool calls and feed results back
       for (const tc of pendingToolCalls) {
         const call: ToolCall = { id: tc.id, name: tc.name, args: tc.args };
-        this.options.onEvent({ type: 'tool_call', call });
 
         let result: any;
         try {
-          result = tc.name === 'memory'
-            ? await this.handleMemoryTool(tc.args)
-            : await this.tools.execute(tc.name, tc.args);
+          if (tc.name === 'memory') {
+            result = await this.handleMemoryTool(tc.args);
+          } else {
+            const execResult = await this.tools.execute(tc.name, tc.args);
+            result = execResult.success ? execResult.result : { error: execResult.error };
+          }
           this.options.onEvent({ type: 'tool_result', call, result });
         } catch (err: any) {
           result = { error: err.message };
           this.options.onEvent({ type: 'tool_result', call, result });
         }
 
-        // Add tool result to conversation for next round
+        // Add tool result to conversation with proper tool_call_id
+        // so the LLM can match it to the original tool call
         this.messages.push({
           id: nanoid(),
           role: 'tool',
-          content: `[${tc.name}] ${this.formatToolResult(tc.name, result)}`,
+          content: this.formatToolResult(tc.name, result),
           timestamp: Date.now(),
-        });
+          toolCallId: tc.id,
+        } as any);
       }
 
       // Continue loop — LLM will see tool results and decide next action

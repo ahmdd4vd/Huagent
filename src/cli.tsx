@@ -411,19 +411,21 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
 
   // TUI mode
   if (options.tui !== false) {
-    const tuiMode = 'modern';
-    const engine = new Engine(client, memory, tools, sessions, {
-      onEvent: (event: any) => {},
-    });
-
-    // OpenCodeApp is the new production TUI (OpenCode-inspired design).
-    // ModernApp is kept as a fallback in case the new TUI has issues.
-    const AppComponent = OpenCodeApp;
-
-    // Wire the dialog controller so the TUI can pause the engine
-    // for questions / permissions / plan reviews.
+    // Wire the dialog controller BEFORE creating the engine so events
+    // are published from the very first call.
     const { getDialogController } = await import('./tui/dialog-controller.js');
     const dialog = getDialogController();
+
+    const engine = new Engine(client, memory, tools, sessions, {
+      onEvent: (event: any) => {
+        dialog.publishEvent(event);
+      },
+      onQuestion: (req: any) => dialog.askUser(req),
+      onPermissionRequest: (req: any) => dialog.requestPermission(req),
+      onPlanReview: (plan: any) => dialog.reviewPlan(plan),
+    });
+
+    const AppComponent = OpenCodeApp;
 
     const { waitUntilExit } = render(
       React.createElement(AppComponent, {
@@ -435,18 +437,8 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
         skills,
         config,
         onSubmit: async (msg: string) => {
-          // Wire dialog callbacks into the engine for this session.
-          // Using setOptions (not a new constructor) preserves the
-          // engine's existing state (messages, session, stats).
-          (engine as any).setOptions?.({
-            onQuestion: (req: any) => dialog.askUser(req),
-            onPermissionRequest: (req: any) => dialog.requestPermission(req),
-            onPlanReview: (plan: any) => dialog.reviewPlan(plan),
-            onEvent: (event: any) => {
-              // Forward to dialog controller (for TUI live updates)
-              dialog.publishEvent(event);
-            },
-          });
+          // Events are already wired at engine construction time.
+          // Just process the message.
           return engine.process(msg, config.workdir);
         },
         onExit: async () => {

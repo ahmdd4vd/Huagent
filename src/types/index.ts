@@ -7,6 +7,8 @@ export interface Message {
   timestamp: number;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
+  /** For role='tool' messages: the ID of the tool call this result belongs to. */
+  toolCallId?: string;
   metadata?: Record<string, any>;
 }
 
