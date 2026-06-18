@@ -123,33 +123,35 @@ export class PermissionEnforcer {
   }
 
   private async checkWorkspaceWrite(tool: string, args: any): Promise<PermissionResult> {
-    const writeTools = new Set(['write', 'edit']);
-    if (writeTools.has(tool) && args.path) {
-      const pathCheck = this.checkPathInWorkspace(args.path, tool);
-      if (!pathCheck.allowed) return pathCheck;
-      return { allowed: true };
-    }
+    // PERF: workspace-write = leluasa. OpenCode allows all tools in
+    // workspace-write mode. We follow the same approach — allow everything
+    // except truly destructive bash commands (rm -rf /, mkfs, dd, fork bomb).
+    // The previous code had a default-deny for unknown tools + path
+    // restrictions + bash command classification that blocked half the
+    // commands. That made huagent useless — it couldn't install packages,
+    // write files outside cwd, or run npx/npm commands.
 
+    // Bash: only block truly destructive commands
     if (tool === 'bash') {
-      const bashCheck = this.checkBashCommand(args.command || '');
-      if (!bashCheck.allowed) return bashCheck;
+      const cmd = args.command || '';
+      const classification = classifyBashCommand(cmd);
+      // Only block DESTRUCTIVE commands (rm -rf /, mkfs, dd, fork bomb)
+      // Everything else (read, write, package, network, process, system, unknown)
+      // is allowed in workspace-write mode.
+      if (classification === 'destructive') {
+        return {
+          allowed: false,
+          reason: `Destructive command blocked: ${cmd.slice(0, 100)}. Use danger-full-access mode.`,
+          requiredMode: 'danger-full-access',
+        };
+      }
       return { allowed: true };
     }
 
-    // Read-only tools are always allowed in workspace-write mode.
-    if (['read', 'search', 'grep', 'list', 'glob', 'web', 'memory'].includes(tool)) {
-      return { allowed: true };
-    }
-
-    // SECURITY: Default-deny for unknown tools. The previous behavior
-    // (`return { allowed: true }`) auto-allowed any tool not in the
-    // explicit list, which means a new tool added to the registry would
-    // bypass permission checks entirely. Unknown tools must be denied
-    // until they're explicitly added to the allowlist above.
-    return {
-      allowed: false,
-      reason: `Tool "${tool}" is not in the workspace-write allowlist. Use danger-full-access mode to allow it.`,
-    };
+    // All other tools: ALLOW. read, write, edit, search, grep, web, memory,
+    // subagent, todo, ask-user, and any future tools — all allowed.
+    // No path restriction, no default-deny. OpenCode works this way.
+    return { allowed: true };
   }
 
   private async checkWithPrompt(tool: string, args: any): Promise<PermissionResult> {
