@@ -15,6 +15,12 @@ export const writeTool = {
     required: ['path', 'content'],
   },
   async execute(args: { path: string; content: string }) {
+    if (!args || !args.path) {
+      throw new Error('write tool requires a "path" argument');
+    }
+    if (args.content === undefined || args.content === null) {
+      throw new Error('write tool requires a "content" argument');
+    }
     const fullPath = resolve(this.workdir, args.path);
     const dir = dirname(fullPath);
 

@@ -488,7 +488,35 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
       output: process.stdout,
       terminal: process.stdin.isTTY,
     });
-    const engine = new Engine(client, memory, tools, sessions);
+    const engine = new Engine(client, memory, tools, sessions, {
+      onEvent: (event: any) => {
+        // Stream text + tool calls to stdout in real-time (like TUI but plain text)
+        if (event.type === 'stream_delta') {
+          // Clear the thinking indicator and write streamed text
+          process.stdout.write('\r\x1b[K');
+          if (event.accumulated) {
+            process.stdout.write(event.accumulated);
+          }
+        } else if (event.type === 'tool_call') {
+          // Show tool call inline
+          process.stdout.write('\r\x1b[K');
+          const toolName = event.call?.name || '?';
+          const toolArgs = event.call?.args || {};
+          const argStr = toolArgs.path || toolArgs.command || toolArgs.pattern || '';
+          console.log(fg(theme.textMuted, `  ⠋ ${toolName}  ${String(argStr).slice(0, 60)}`));
+        } else if (event.type === 'tool_result') {
+          // Show tool result status
+          const result = event.result;
+          const isError = result && typeof result === 'object' && result.error;
+          const icon = isError ? '✗' : '✓';
+          const color = isError ? theme.error : theme.success;
+          process.stdout.write('\r\x1b[K');
+          console.log(fg(color, `  ${icon} done`));
+        } else if (event.type === 'thinking') {
+          process.stdout.write(fg(theme.textMuted, '⠋ thinking...\r'));
+        }
+      },
+    });
 
     // Print a minimal header — no mascot, no big banner.
     console.log(fg(theme.text, `huagent v${VERSION}`));
@@ -512,21 +540,19 @@ async function startAgent(message: string | undefined, options: any, fullArgs: s
             return;
           }
           if (cmd) {
-            // Use braille spinner for "thinking" — matches the TUI's aesthetic.
-            process.stdout.write(fg(theme.textMuted, '⠋ thinking...'));
             try {
               const response = await engine.process(cmd, config.workdir);
-              // Clear the thinking line and print the response.
-              process.stdout.write('\r\x1b[K');
-              console.log(fg(theme.accent, 'huagent') + fg(theme.textMuted, ' ·'));
-              console.log(fg(theme.text, response));
+              // If response is non-empty and wasn't already streamed, print it
+              if (response && response.trim()) {
+                process.stdout.write('\r\x1b[K');
+                console.log(fg(theme.text, response));
+              }
               console.log('');
             } catch (err: any) {
               process.stdout.write('\r\x1b[K');
               console.error(fg(theme.error, `error: ${err.message}`));
             }
           }
-          // Schedule next prompt on next tick so we don't recurse.
           setImmediate(prompt);
         });
       } catch {

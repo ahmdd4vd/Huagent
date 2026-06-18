@@ -32,6 +32,11 @@ export const bashTool = {
     required: ['command'],
   },
   async execute(args: { command: string; timeout?: number; cwd?: string }) {
+    // Null check — LLM might send empty args
+    if (!args || !args.command) {
+      throw new Error('bash tool requires a "command" argument');
+    }
+
     // Safety check
     for (const blocked of BLOCKED) {
       if (args.command.includes(blocked)) {

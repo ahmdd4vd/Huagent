@@ -20,6 +20,9 @@ export const readTool: Tool & { workdir: string } = {
     required: ['path'],
   },
   async execute(args: { path: string; startLine?: number; endLine?: number }) {
+    if (!args || !args.path) {
+      throw new Error('read tool requires a "path" argument');
+    }
     const fullPath = resolve(this.workdir, args.path);
 
     if (!existsSync(fullPath)) {

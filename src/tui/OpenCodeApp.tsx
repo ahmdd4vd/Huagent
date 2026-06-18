@@ -459,7 +459,12 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
       await onSubmit(text);
     } catch (err: any) {
       pushToast('error', err.message || 'Submission failed');
+      // CRITICAL: Reset all loading states on error, otherwise the
+      // spinner keeps spinning forever and the prompt stays disabled.
       setIsThinking(false);
+      setIsStreaming(false);
+      setStreamingText('');
+      streamingMsgIdRef.current = null;
     }
   }, [onSubmit, pushToast]);
 
