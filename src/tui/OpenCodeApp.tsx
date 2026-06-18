@@ -20,7 +20,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
-import { MessageList, type ChatMessage } from './oc/MessageList.js';
+import { MessageList, type ChatMessage, type ToolCallInfo } from './oc/MessageList.js';
 import { Prompt, type PromptStatus } from './oc/Prompt.js';
 import { Footer } from './oc/Footer.js';
 import { Picker as OCPicker, type PickerItem } from './oc/Picker.js';
@@ -259,92 +259,143 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
 
   // ── Engine event handler (defined before useEffect so the subscription
   //    below can reference it without TDZ issues) ─────────────────
+  // Track the current streaming assistant message ID so we can append
+  // tool calls to it as they arrive during streaming.
+  const streamingMsgIdRef = useRef<string | null>(null);
+
   const handleEngineEvent = useCallback((event: EngineEvent) => {
     switch (event.type) {
       case 'thinking':
         setIsThinking(true);
         setIsStreaming(false);
         setStreamingText('');
+        streamingMsgIdRef.current = null;
         break;
+
       case 'stream_delta': {
-        // stream_delta carries `delta` (incremental) and `accumulated` (full).
+        // Streaming text arrives in real-time. Update the streaming text
+        // display. Tool calls may arrive interleaved with text deltas.
         setIsThinking(false);
         setIsStreaming(true);
         setStreamingText(event.accumulated || event.delta || '');
         break;
       }
-      case 'message': {
-        // A complete message arrived. If it's an assistant message, append it
-        // to the chat history and clear the streaming state.
-        const msg = (event as any).message;
-        if (msg && (msg.role === 'assistant' || msg.role === 'user')) {
-          if (msg.role === 'assistant') {
-            setMessages((m) => [...m, {
-              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              role: 'assistant',
-              content: typeof msg.content === 'string' ? msg.content : '',
-              timestamp: Date.now(),
-            }]);
-            setIsStreaming(false);
-            setStreamingText('');
-            setIsThinking(false);
-          }
-        }
-        break;
-      }
+
       case 'tool_call': {
+        // A tool call arrived during streaming. Add it as an inline tool
+        // card to the current streaming message (or create one if this
+        // is the first event).
         const call = (event as any).call;
-        if (call) {
-          setMessages((m) => {
-            const last = m[m.length - 1];
-            if (last && last.role === 'assistant') {
-              return [...m.slice(0, -1), {
-                ...last,
-                toolCalls: [...(last.toolCalls || []), {
-                  name: call.name,
-                  status: 'running',
-                  summary: typeof call.args === 'string' ? call.args : JSON.stringify(call.args || {}).slice(0, 80),
-                }],
-              }];
-            }
-            return m;
-          });
-        }
-        break;
-      }
-      case 'tool_result': {
-        // Update the most recent tool call with the result status.
-        const call = (event as any).call;
-        const result = (event as any).result;
-        const isError = result && typeof result === 'object' && result.error;
+        if (!call) break;
+
+        // If we're streaming, add the tool call to a new assistant message
+        // that will be finalized when streaming ends. For now, show it as
+        // a running tool in the streaming area.
         setMessages((m) => {
-          const last = m[m.length - 1];
-          if (last && last.role === 'assistant' && last.toolCalls && last.toolCalls.length > 0) {
-            const newCalls = [...last.toolCalls];
-            const lastCall = newCalls[newCalls.length - 1];
-            newCalls[newCalls.length - 1] = {
-              ...lastCall,
-              status: isError ? 'error' : 'success',
-            };
-            return [...m.slice(0, -1), { ...last, toolCalls: newCalls }];
+          // Find or create the current streaming assistant message
+          let msgId = streamingMsgIdRef.current;
+          if (!msgId) {
+            msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+            streamingMsgIdRef.current = msgId;
+            return [...m, {
+              id: msgId,
+              role: 'assistant' as const,
+              content: '',
+              timestamp: Date.now(),
+              toolCalls: [{
+                name: call.name,
+                status: 'running' as const,
+                args: call.args,
+              }],
+            }];
           }
-          return m;
+          // Append to existing streaming message
+          return m.map((msg) => {
+            if (msg.id === msgId) {
+              return {
+                ...msg,
+                toolCalls: [...(msg.toolCalls || []), {
+                  name: call.name,
+                  status: 'running' as const,
+                  args: call.args,
+                }],
+              };
+            }
+            return msg;
+          });
         });
         break;
       }
+
+      case 'tool_result': {
+        // Tool finished — update its status and add result preview.
+        const call = (event as any).call;
+        const result = (event as any).result;
+        const isError = result && typeof result === 'object' && result.error;
+        const msgId = streamingMsgIdRef.current;
+        if (!msgId) break;
+
+        setMessages((m) => m.map((msg) => {
+          if (msg.id !== msgId || !msg.toolCalls) return msg;
+          const newCalls = [...msg.toolCalls];
+          // Find the last running tool call with this name
+          for (let i = newCalls.length - 1; i >= 0; i--) {
+            if (newCalls[i].name === call.name && newCalls[i].status === 'running') {
+              newCalls[i] = {
+                ...newCalls[i],
+                status: isError ? 'error' : 'success',
+                result: result,
+                durationMs: call.durationMs,
+              };
+              break;
+            }
+          }
+          return { ...msg, toolCalls: newCalls };
+        }));
+        break;
+      }
+
+      case 'message': {
+        // A complete assistant message arrived. Finalize it.
+        const msg = (event as any).message;
+        if (msg && msg.role === 'assistant') {
+          const content = typeof msg.content === 'string' ? msg.content : '';
+          const msgId = streamingMsgIdRef.current;
+
+          if (msgId) {
+            // Update the existing streaming message with final content
+            setMessages((m) => m.map((mm) =>
+              mm.id === msgId ? { ...mm, content, streaming: false } : mm
+            ));
+          } else {
+            // No streaming message was created (e.g. tool-call-only response)
+            setMessages((m) => [...m, {
+              id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              role: 'assistant',
+              content,
+              timestamp: Date.now(),
+            }]);
+          }
+
+          setIsStreaming(false);
+          setStreamingText('');
+          setIsThinking(false);
+          streamingMsgIdRef.current = null;
+        }
+        break;
+      }
+
       case 'permission':
         setPendingPermissions((p) => p + 1);
         break;
+
       case 'step_failed':
         pushToast('error', (event as any).error || 'Step failed');
+        setIsThinking(false);
+        setIsStreaming(false);
+        streamingMsgIdRef.current = null;
         break;
-      case 'compact':
-        pushToast('info', `Compacted: ${(event as any).before} → ${(event as any).after} messages`);
-        break;
-      case 'reflection':
-        // Reflections are informational; surface them as a toast.
-        pushToast('info', `Learned: ${(event as any).learned}`);
-        break;
+
       case 'stage':
       case 'plan_created':
       case 'plan_approved':
@@ -357,12 +408,10 @@ export const OpenCodeApp: React.FC<OpenCodeAppProps> = ({
       case 'subagent_start':
       case 'subagent_done':
       case 'session_resumed':
-        // No-op — these events are surfaced via the DialogController
-        // or the activity store, not the main chat list.
-        break;
       case 'question':
+      case 'compact':
+      case 'reflection':
       default:
-        // Unknown event type — ignore silently rather than throwing.
         break;
     }
   }, [pushToast]);

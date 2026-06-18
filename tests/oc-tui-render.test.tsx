@@ -41,7 +41,7 @@ describe('OpenCode TUI — MessageList rendering', () => {
     );
     const frame = lastFrame() || '';
     expect(frame).toContain('hello world');
-    expect(frame).toContain('→'); // user message arrow prefix
+    expect(frame).toContain('›'); // user message arrow prefix (OpenCode style)
   });
 
   it('renders assistant messages with model label', () => {
@@ -68,8 +68,8 @@ describe('OpenCode TUI — MessageList rendering', () => {
   it('renders tool calls inline as badges', () => {
     const m = msg('assistant', 'reading files now', {
       toolCalls: [
-        { name: 'read', status: 'success', durationMs: 100, summary: 'src/index.ts' },
-        { name: 'bash', status: 'running' },
+        { name: 'read', status: 'success', durationMs: 100, args: { path: 'src/index.ts' } },
+        { name: 'bash', status: 'running', args: { command: 'ls' } },
       ],
     });
     const { lastFrame } = render(<MessageList messages={[m]} width={80} />);

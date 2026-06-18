@@ -1,13 +1,6 @@
 /**
  * useSpinnerFrame — cycles through braille spinner frames.
- *
- * Shared between MessageList, Prompt, and other components that need a
- * braille spinner animation. Extracted to a single file so we don't have
- * three copies of the same useState + setInterval pattern.
- *
- * @param intervalMs Frame interval in milliseconds (default 80ms).
- * @returns The current frame index (0-9). Use SPINNER_FRAMES[frame] to
- *         get the actual character.
+ * Shared across all TUI components.
  */
 
 import { useState, useEffect } from 'react';

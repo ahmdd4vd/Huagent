@@ -1,53 +1,47 @@
 /**
- * MessageList — scrollable list of chat messages.
+ * MessageList — OpenCode-style chat message rendering.
  *
- * OpenCode-inspired design:
- *   - No "hua" mascot character
- *   - No emoji decorations
- *   - User messages: prefixed with a subtle "» " marker, otherwise plain text
- *   - Assistant messages: prefixed with the model name in muted color
- *   - Tool calls: rendered inline with a collapsible-looking status badge
- *   - Timestamps optional (small, muted, right-aligned)
- *
- * Since Ink doesn't have a native scrollbox, we render the last N messages
- * (configurable) and auto-scroll to bottom on new messages. When the user
- * has scrolled up (via parent's scroll tracking), we keep the position
- * stable instead of jumping to the bottom.
+ * Design (matching OpenCode):
+ *   - Messages flow naturally: user → assistant text → tool call → result → more text
+ *   - Streaming text appears INLINE as tokens arrive (not in a separate section)
+ *   - Tool calls render as compact inline cards:
+ *       ⠋ read  src/index.ts
+ *       ✓ read  src/index.ts  0.3s
+ *         42 lines
+ *   - Tool results are collapsible (show first 3 lines, then "...")
+ *   - No separate "thinking" section — spinner is inline with streaming text
+ *   - Timestamps optional
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { Box, Text } from 'ink';
-import { theme, glyph, truncate } from './theme.js';
+import { theme, truncate } from './theme.js';
 import { useSpinnerFrame, SPINNER_FRAMES } from './useSpinner.js';
+
+export interface ToolCallInfo {
+  name: string;
+  status: 'running' | 'success' | 'error' | 'skipped';
+  durationMs?: number;
+  args?: Record<string, any>;
+  result?: any;
+}
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
-  /** Optional tool-call metadata for assistant messages. */
-  toolCalls?: Array<{
-    name: string;
-    status: 'running' | 'success' | 'error' | 'skipped';
-    durationMs?: number;
-    summary?: string;
-  }>;
-  /** Streaming flag for in-flight assistant messages. */
+  toolCalls?: ToolCallInfo[];
   streaming?: boolean;
 }
 
 export interface MessageListProps {
   messages: ChatMessage[];
   width: number;
-  /** Max number of messages to render (older ones are pruned). */
   maxVisible?: number;
-  /** Show timestamp next to each message. */
   showTimestamps?: boolean;
-  /** Streaming text for in-flight assistant response. */
   streamingText?: string;
-  /** Whether the engine is currently thinking (no streaming text yet). */
   isThinking?: boolean;
-  /** Currently selected model name (for assistant message labels). */
   modelLabel?: string;
 }
 
@@ -60,21 +54,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   isThinking = false,
   modelLabel = 'huagent',
 }) => {
-  // Track the bottom of the list so we can auto-scroll.
-  // Ink doesn't have a real scroll container, but by always rendering the
-  // last N messages and putting the most recent at the bottom, the
-  // terminal's native scrollback buffer handles the rest.
   const visibleMessages = messages.slice(-maxVisible);
-  const bottomRef = useRef<React.ComponentRef<typeof Box>>(null);
-
-  // When the message count changes, the terminal's natural scroll-to-bottom
-  // (via Ink writing new lines) keeps the latest visible. We don't need to
-  // programmatically scroll — Ink re-renders the whole tree each time.
-  useEffect(() => {
-    // No-op: Ink handles scrollback for us. This effect exists to make the
-    // intent explicit (auto-scroll on new messages) in case we later add
-    // a real scrollbox.
-  }, [messages.length, streamingText]);
 
   return (
     <Box flexDirection="column" gap={1} paddingBottom={1}>
@@ -88,7 +68,7 @@ export const MessageList: React.FC<MessageListProps> = ({
         />
       ))}
 
-      {/* In-flight assistant response */}
+      {/* In-flight assistant response — streaming text + thinking spinner */}
       {(isThinking || streamingText.length > 0) && (
         <StreamingMessage
           text={streamingText}
@@ -101,7 +81,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   );
 };
 
-// ─── Single message rendering ────────────────────────────────────
+// ─── Single message ──────────────────────────────────────────────
 
 const MessageItem: React.FC<{
   message: ChatMessage;
@@ -109,12 +89,7 @@ const MessageItem: React.FC<{
   showTimestamp: boolean;
   modelLabel: string;
 }> = ({ message, width, showTimestamp, modelLabel }) => {
-  // Calculate the wrap width for the message body. We leave room for the
-  // 2-space left margin on assistant messages and the timestamp on the right.
-  const bodyWidth = Math.max(20, width - (showTimestamps_safe(showTimestamp) ? 8 : 2));
-
   if (message.role === 'system') {
-    // System messages are very subdued.
     return (
       <Box>
         <Text color={theme.textMuted}>  </Text>
@@ -127,7 +102,7 @@ const MessageItem: React.FC<{
     return (
       <Box flexDirection="column">
         <Box>
-          <Text color={theme.primary} bold>{glyph.arrowR} </Text>
+          <Text color={theme.primary} bold>› </Text>
           <Text color={theme.text} wrap="wrap">{message.content}</Text>
         </Box>
         {showTimestamp && (
@@ -139,7 +114,7 @@ const MessageItem: React.FC<{
     );
   }
 
-  // Assistant message
+  // Assistant message — render content + inline tool calls
   return (
     <Box flexDirection="column">
       <Box>
@@ -148,21 +123,23 @@ const MessageItem: React.FC<{
           <Text color={theme.textMuted}> {formatTime(message.timestamp)}</Text>
         )}
       </Box>
-      <Box marginLeft={2} flexDirection="column">
-        <Text color={theme.text} wrap="wrap">{message.content}</Text>
-        {message.toolCalls && message.toolCalls.length > 0 && (
-          <Box marginTop={1} flexDirection="column" gap={0}>
-            {message.toolCalls.map((tc, i) => (
-              <ToolCallBadge key={i} call={tc} width={Math.max(10, bodyWidth - 4)} />
-            ))}
-          </Box>
-        )}
-      </Box>
+      {message.content && (
+        <Box marginLeft={2}>
+          <Text color={theme.text} wrap="wrap">{message.content}</Text>
+        </Box>
+      )}
+      {message.toolCalls && message.toolCalls.length > 0 && (
+        <Box marginLeft={2} marginTop={0} flexDirection="column" gap={0}>
+          {message.toolCalls.map((tc, i) => (
+            <ToolCard key={i} call={tc} width={Math.max(20, width - 4)} />
+          ))}
+        </Box>
+      )}
     </Box>
   );
 };
 
-// ─── Streaming message (in-flight assistant response) ────────────
+// ─── Streaming message (in-flight) ───────────────────────────────
 
 const StreamingMessage: React.FC<{
   text: string;
@@ -176,18 +153,13 @@ const StreamingMessage: React.FC<{
     <Box flexDirection="column">
       <Box>
         <Text color={theme.accent} bold>{modelLabel}</Text>
-        <Text color={theme.textMuted}> </Text>
-        <Text color={theme.primary}>{SPINNER_FRAMES[frame]}</Text>
-        <Text color={theme.textMuted}>
-          {' '}
-          {isThinking ? 'thinking' : 'writing'}
-          {glyph.ellipsis}
-        </Text>
+        <Text color={theme.primary}> {SPINNER_FRAMES[frame]}</Text>
+        {!text && isThinking && (
+          <Text color={theme.textMuted}> thinking…</Text>
+        )}
       </Box>
-      {text.length > 0 && (
+      {text && (
         <Box marginLeft={2}>
-          {/* Wrap the streaming text instead of truncating it — users want
-              to see the full in-flight response, not a truncated preview. */}
           <Text color={theme.text} wrap="wrap">{text}</Text>
         </Box>
       )}
@@ -195,54 +167,67 @@ const StreamingMessage: React.FC<{
   );
 };
 
-// ─── Tool call badge (compact, inline) ───────────────────────────
+// ─── Tool card (compact, inline — OpenCode style) ────────────────
 
-const ToolCallBadge: React.FC<{
-  call: {
-    name: string;
-    status: 'running' | 'success' | 'error' | 'skipped';
-    durationMs?: number;
-    summary?: string;
-  };
+const ToolCard: React.FC<{
+  call: ToolCallInfo;
   width: number;
 }> = ({ call, width }) => {
   const frame = useSpinnerFrame();
-  let icon: string = glyph.pending;
-  let color: string = theme.textMuted;
 
+  // Icon + color based on status
+  let icon: string;
+  let color: string;
   switch (call.status) {
     case 'running':
       icon = SPINNER_FRAMES[frame];
       color = theme.primary;
       break;
     case 'success':
-      icon = glyph.success;
+      icon = '✓';
       color = theme.success;
       break;
     case 'error':
-      icon = glyph.fail;
+      icon = '✗';
       color = theme.error;
       break;
     case 'skipped':
-      icon = glyph.skip;
+      icon = '⊘';
       color = theme.textMuted;
       break;
   }
 
-  const duration =
-    call.durationMs !== undefined && call.durationMs > 0
-      ? ` ${(call.durationMs / 1000).toFixed(1)}s`
-      : '';
-  const summary = call.summary
-    ? ` ${truncate(call.summary, Math.max(10, width - call.name.length - duration.length - 4))}`
-    : '';
+  // Build the summary line: icon + tool name + key arg + duration
+  const duration = call.durationMs ? ` ${(call.durationMs / 1000).toFixed(1)}s` : '';
+  const keyArg = getToolSummaryArg(call);
+  const summaryText = keyArg ? `  ${call.name}  ${truncate(keyArg, width - call.name.length - duration.length - 6)}` : `  ${call.name}`;
+
+  // Build result preview (first 3 lines for successful tools)
+  const resultPreview = call.status === 'success' && call.result
+    ? formatToolResult(call.name, call.result, 3)
+    : call.status === 'error' && call.result
+      ? formatToolResult(call.name, call.result, 3)
+      : null;
 
   return (
-    <Box>
-      <Text color={color}>{icon} </Text>
-      <Text color={theme.text} bold>{call.name}</Text>
-      <Text color={theme.textMuted}>{duration}</Text>
-      <Text color={theme.textMuted}>{summary}</Text>
+    <Box flexDirection="column">
+      <Box>
+        <Text color={color}>{icon}</Text>
+        <Text color={theme.textMuted}>{summaryText}</Text>
+        <Text color={theme.textMuted}>{duration}</Text>
+      </Box>
+      {resultPreview && (
+        <Box marginLeft={4} flexDirection="column">
+          {resultPreview.split('\n').slice(0, 3).map((line, i) => (
+            <Box key={i}>
+              <Text color={theme.textMuted} dimColor>  {truncate(line, width - 6)}</Text>
+            </Box>
+          ))}
+          {resultPreview.split('\n').length > 3 && (
+            <Text color={theme.textMuted} dimColor>  …{resultPreview.split('\n').length - 3} more lines</Text>
+          )}
+        </Box>
+      )}
     </Box>
   );
 };
@@ -250,12 +235,78 @@ const ToolCallBadge: React.FC<{
 // ─── Helpers ─────────────────────────────────────────────────────
 
 /**
- * Tiny helper to make the showTimestamps flag safe in JSX conditionals.
- * We use this to compute bodyWidth above — wrapping a boolean check in
- * a function call looks awkward inline, so we extract it.
+ * Get the most useful argument for display in the tool summary line.
+ * e.g. read(path) → show path, bash(command) → show command, write(path) → show path
  */
-function showTimestamps_safe(v: boolean): boolean {
-  return v;
+function getToolSummaryArg(call: ToolCallInfo): string {
+  const args = call.args || {};
+  switch (call.name) {
+    case 'read':
+    case 'write':
+    case 'edit':
+      return args.path || '';
+    case 'bash':
+      return truncate(args.command || '', 60);
+    case 'grep':
+      return args.pattern || '';
+    case 'search':
+      return args.pattern || '';
+    case 'web':
+      return args.query || '';
+    case 'subagent':
+      return args.type || args.task || '';
+    case 'memory':
+      return args.action || '';
+    default:
+      // Show first string value
+      const firstVal = Object.values(args).find(v => typeof v === 'string');
+      return firstVal ? String(firstVal) : '';
+  }
+}
+
+/**
+ * Format tool result for inline preview.
+ * Shows a few lines of the result so the user can see what happened
+ * without expanding the full output.
+ */
+function formatToolResult(toolName: string, result: any, maxLines: number): string {
+  if (!result) return '';
+
+  // For read tool — show file content preview
+  if (toolName === 'read' && typeof result === 'string') {
+    return result;
+  }
+
+  // For bash — show stdout
+  if (toolName === 'bash' && typeof result === 'object') {
+    const stdout = result.stdout || result.content || '';
+    const stderr = result.stderr || '';
+    if (stdout) return stdout;
+    if (stderr) return stderr;
+    return '';
+  }
+
+  // For grep/search — show matches
+  if ((toolName === 'grep' || toolName === 'search') && typeof result === 'object') {
+    const matches = result.matches || [];
+    if (matches.length === 0) return 'No matches';
+    return matches.slice(0, maxLines).map((m: any) =>
+      `${m.file || ''}:${m.line || ''} ${m.content || ''}`
+    ).join('\n');
+  }
+
+  // For write/edit — show confirmation
+  if (toolName === 'write' || toolName === 'edit') {
+    return typeof result === 'string' ? result : 'File updated';
+  }
+
+  // Fallback — stringify
+  if (typeof result === 'string') return result;
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
 }
 
 function formatTime(ts: number): string {
